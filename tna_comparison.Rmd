@@ -1,0 +1,411 @@
+---
+title: "TNA Package: Python vs R Equivalence"
+author: "TNA Analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 8
+)
+
+# Load reticulate for Python support
+library(reticulate)
+
+# Use system Python (adjust path if needed)
+# use_python("/usr/bin/python3", required = TRUE)
+```
+
+# Introduction
+
+This document demonstrates the equivalence between the **Python TNA package** and the **R TNA package** for Transition Network Analysis. Both implementations produce numerically equivalent results for analyzing sequential data as transition networks.
+
+---
+
+# Setup
+
+## R Setup
+
+```{r r-setup}
+# Install TNA if not available
+if (!requireNamespace("tna", quietly = TRUE)) {
+  install.packages("tna")
+}
+
+library(tna)
+library(qgraph)  # For network visualization
+```
+
+## Python Setup
+
+```{python py-setup}
+import numpy as np
+import pandas as pd
+import tna
+import matplotlib.pyplot as plt
+
+print(f"Python TNA version: {tna.__version__}")
+```
+
+---
+
+# Load Data
+
+Both packages include the same group regulation dataset with 2000 learning sessions.
+
+## R: Load Data
+
+```{r r-load-data}
+# Load the group regulation dataset
+data("group_regulation", package = "tna")
+
+cat("Dataset dimensions:", dim(group_regulation), "\n")
+cat("Columns:", paste(colnames(group_regulation)[1:5], collapse = ", "), "...\n")
+cat("Unique states:", paste(unique(unlist(group_regulation)), collapse = ", "), "\n")
+```
+## Python: Load Data
+
+```{python py-load-data}
+# Load the group regulation dataset
+df = tna.load_group_regulation()
+
+print(f"Dataset dimensions: {df.shape}")
+print(f"Columns: {', '.join(df.columns[:5])}...")
+print(f"Unique states: {', '.join(sorted(df.stack().dropna().unique()))}")
+```
+
+---
+# Build TNA Models
+
+## R: Build Model
+
+```{r r-build-model}
+# Build relative transition probability model
+model_r <- tna(group_regulation)
+
+# Display model summary
+print(model_r)
+
+# Show transition matrix
+cat("\nTransition Matrix (first 5x5):\n")
+print(round(model_r$weights[1:5, 1:5], 3))
+```
+
+## Python: Build Model
+
+```{python py-build-model}
+# Build relative transition probability model
+model_py = tna.tna(df)
+
+# Display model summary
+print(model_py)
+
+# Show transition matrix
+print("\nTransition Matrix (first 5x5):")
+print(model_py.to_dataframe().iloc[:5, :5].round(3))
+```
+
+---
+
+# Compare Transition Matrices
+
+```{r compare-matrices}
+# Get R transition matrix
+weights_r <- model_r$weights
+rownames(weights_r) <- model_r$labels
+colnames(weights_r) <- model_r$labels
+```
+
+```{python py-get-weights}
+# Get Python transition matrix
+weights_py = model_py.weights
+labels_py = model_py.labels
+```
+
+```{r compare-results}
+# Get Python results in R
+weights_py_r <- py$weights_py
+labels_py_r <- py$labels_py
+
+# Reorder Python matrix to match R labels
+idx <- match(model_r$labels, labels_py_r)
+weights_py_reordered <- weights_py_r[idx, idx]
+
+# Calculate difference
+diff_matrix <- weights_r - weights_py_reordered
+max_diff <- max(abs(diff_matrix))
+
+cat("Maximum absolute difference:", max_diff, "\n")
+cat("Matrices are equivalent:", max_diff < 1e-10, "\n")
+```
+
+---
+
+# Centrality Measures
+
+## R: Compute Centralities
+
+```{r r-centralities}
+# Compute all centrality measures
+cent_r <- centralities(model_r)
+
+# Display results
+print(round(cent_r, 4))
+```
+
+## Python: Compute Centralities
+
+```{python py-centralities}
+# Compute all centrality measures
+cent_py = tna.centralities(model_py)
+
+# Display results
+print(cent_py.round(4))
+```
+
+## Compare Centralities
+
+```{r compare-centralities}
+# Get Python centralities
+cent_py_r <- py$cent_py
+
+# Compare specific measures
+measures <- c("OutStrength", "InStrength", "Betweenness", "Diffusion", "Clustering")
+
+for (measure in measures) {
+  if (measure %in% colnames(cent_r) && measure %in% colnames(cent_py_r)) {
+    # Reorder to match
+    py_vals <- cent_py_r[match(rownames(cent_r), rownames(cent_py_r)), measure]
+    r_vals <- cent_r[, measure]
+    max_diff <- max(abs(r_vals - py_vals), na.rm = TRUE)
+    cat(sprintf("%s - Max difference: %.2e\n", measure, max_diff))
+  }
+}
+```
+
+---
+
+# Network Visualization
+
+## R: Network Plot
+
+```{r r-network-plot, fig.width=10, fig.height=10}
+# Plot network using qgraph (R TNA style)
+plot(model_r, layout = "circle")
+```
+
+## Python: Network Plot
+
+```{python py-network-plot, fig.width=10, fig.height=10}
+# Plot network using Python TNA
+fig, ax = plt.subplots(figsize=(10, 10))
+tna.plot_network(
+    model_py,
+    layout="circular",
+    node_size="OutStrength",
+    edge_threshold=0.05,
+    ax=ax
+)
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+# Centrality Bar Charts
+
+## R: Centrality Plot
+
+```{r r-centrality-plot, fig.width=12, fig.height=8}
+# Plot centralities
+plot(cent_r, ncol = 3)
+```
+
+## Python: Centrality Plot
+
+```{python py-centrality-plot, fig.width=12, fig.height=8}
+# Plot centralities
+fig = tna.plot_centralities(
+    cent_py,
+    measures=['OutStrength', 'InStrength', 'Betweenness', 'Closeness', 'Clustering', 'Diffusion'],
+    ncol=3
+)
+plt.show()
+```
+
+---
+
+# Heatmap Visualization
+
+## R: Heatmap
+
+```{r r-heatmap, fig.width=10, fig.height=8}
+# Heatmap of transition matrix
+heatmap(model_r$weights,
+        Rowv = NA, Colv = NA,
+        col = colorRampPalette(c("white", "steelblue", "darkblue"))(100),
+        scale = "none",
+        margins = c(10, 10),
+        main = "R: Transition Matrix Heatmap")
+```
+
+## Python: Heatmap
+
+```{python py-heatmap, fig.width=10, fig.height=8}
+# Heatmap of transition matrix
+fig, ax = plt.subplots(figsize=(10, 8))
+tna.plot_heatmap(model_py, ax=ax)
+plt.show()
+```
+
+---
+
+# Different Model Types
+
+## Frequency Model (FTNA)
+
+### R
+
+```{r r-ftna}
+# Build frequency model
+ftna_r <- tna(group_regulation, type = "frequency")
+cat("R FTNA - Total transitions:", sum(ftna_r$weights), "\n")
+cat("R FTNA - Max weight:", max(ftna_r$weights), "\n")
+```
+
+### Python
+
+```{python py-ftna}
+# Build frequency model
+ftna_py = tna.ftna(df)
+print(f"Python FTNA - Total transitions: {ftna_py.weights.sum():.0f}")
+print(f"Python FTNA - Max weight: {ftna_py.weights.max():.0f}")
+```
+
+## Co-occurrence Model (CTNA)
+
+### R
+
+```{r r-ctna}
+# Build co-occurrence model
+ctna_r <- tna(group_regulation, type = "co-occurrence")
+cat("R CTNA - Symmetric check:", isSymmetric(ctna_r$weights), "\n")
+```
+
+### Python
+
+```{python py-ctna}
+# Build co-occurrence model
+ctna_py = tna.ctna(df)
+print(f"Python CTNA type: {ctna_py.type_}")
+```
+
+---
+
+# Model Comparison Plot
+
+```{python py-comparison, fig.width=16, fig.height=5}
+# Compare TNA and FTNA models
+model1 = tna.tna(df)
+model2 = tna.ftna(df)
+
+fig = tna.plot_comparison(
+    model1, model2,
+    plot_type='heatmap',
+    labels=('TNA (Relative)', 'FTNA (Frequency)')
+)
+plt.show()
+```
+
+---
+
+# Sequence Visualization
+
+```{python py-sequences, fig.width=12, fig.height=6}
+# State distribution over time
+fig = tna.plot_sequences(df, plot_type='distribution')
+plt.show()
+```
+
+---
+
+# Summary Statistics
+
+## R Summary
+
+```{r r-summary}
+cat("=== R TNA Summary ===\n")
+cat("Number of states:", length(model_r$labels), "\n")
+cat("States:", paste(model_r$labels, collapse = ", "), "\n")
+cat("Model type:", model_r$type, "\n")
+cat("Number of edges (non-zero):", sum(model_r$weights > 0), "\n")
+cat("Network density:", sum(model_r$weights > 0) / length(model_r$weights), "\n")
+```
+
+## Python Summary
+
+```{python py-summary}
+print("=== Python TNA Summary ===")
+summary = model_py.summary()
+for key, value in summary.items():
+    print(f"{key}: {value}")
+```
+
+---
+
+# Numerical Equivalence Summary
+
+```{r final-comparison}
+# Final equivalence check
+cat("========================================\n")
+cat("    NUMERICAL EQUIVALENCE SUMMARY\n")
+cat("========================================\n\n")
+
+# Transition matrix
+weights_diff <- max(abs(weights_r - weights_py_reordered))
+cat(sprintf("Transition Matrix Max Diff: %.2e %s\n",
+            weights_diff,
+            ifelse(weights_diff < 1e-10, "✓ EQUIVALENT", "✗ DIFFERS")))
+
+# Centralities
+for (measure in c("OutStrength", "InStrength", "Diffusion", "Clustering")) {
+  if (measure %in% colnames(cent_r) && measure %in% colnames(cent_py_r)) {
+    py_vals <- cent_py_r[match(rownames(cent_r), rownames(cent_py_r)), measure]
+    diff <- max(abs(cent_r[, measure] - py_vals), na.rm = TRUE)
+    status <- ifelse(diff < 1e-6, "✓ EQUIVALENT", "✗ DIFFERS")
+    cat(sprintf("%s Max Diff: %.2e %s\n", measure, diff, status))
+  }
+}
+
+cat("\n========================================\n")
+```
+
+---
+
+# Session Info
+
+## R Session
+
+```{r session-info-r}
+sessionInfo()
+```
+
+## Python Session
+
+```{python session-info-py}
+import sys
+print(f"Python version: {sys.version}")
+print(f"NumPy version: {np.__version__}")
+print(f"Pandas version: {pd.__version__}")
+print(f"TNA version: {tna.__version__}")
+```

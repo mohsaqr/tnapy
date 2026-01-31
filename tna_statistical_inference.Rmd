@@ -1,0 +1,525 @@
+---
+title: "TNA Package: Statistical Inference with Bootstrap and Permutation Tests"
+author: "TNA Analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 8
+)
+
+# Load reticulate for Python support
+library(reticulate)
+```
+
+# Introduction
+
+This document demonstrates the **statistical inference** capabilities of the Python TNA package, including:
+
+- **Bootstrap resampling** for confidence intervals on model parameters
+- **Bootstrap centralities** for uncertainty quantification of network measures
+- **Permutation tests** for comparing TNA models between groups
+- **Edge-wise testing** with multiple testing correction
+- **Visualization** of statistical results
+
+These methods enable researchers to assess the statistical significance and reliability of their transition network analyses.
+
+---
+
+# Setup
+
+```{python py-setup}
+import numpy as np
+import pandas as pd
+import tna
+import matplotlib.pyplot as plt
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+print(f"Python TNA version: {tna.__version__}")
+print("\nAvailable statistical inference functions:")
+print("  - bootstrap_tna()")
+print("  - bootstrap_centralities()")
+print("  - permutation_test()")
+print("  - permutation_test_edges()")
+print("  - confidence_interval()")
+print("  - bca_ci()")
+```
+
+---
+
+# Load Data
+
+We'll use the group regulation dataset, which contains 2000 learning sessions with 9 self-regulated learning behaviors.
+
+```{python load-data}
+# Load the group regulation dataset
+df = tna.load_group_regulation()
+
+print(f"Dataset: {df.shape[0]} sequences, {df.shape[1]} time steps")
+print(f"States: {sorted(df.stack().dropna().unique())}")
+
+# Build the base TNA model
+model = tna.tna(df)
+print(f"\nTNA Model: {len(model.labels)} states")
+```
+
+---
+
+# Bootstrap Analysis
+
+Bootstrap resampling provides confidence intervals for TNA model parameters by repeatedly resampling sequences with replacement.
+
+## Basic Bootstrap
+
+```{python bootstrap-basic}
+# Perform bootstrap analysis
+# Using fewer replicates for demonstration; use 1000+ for real analysis
+boot = tna.bootstrap_tna(
+    df,
+    n_boot=500,
+    ci=0.95,
+    seed=42
+)
+
+print(f"Bootstrap Analysis Results:")
+print(f"  - Number of replicates: {boot.n_boot}")
+print(f"  - Confidence level: {boot.ci_level * 100}%")
+print(f"  - Number of states: {len(boot.estimate.labels)}")
+```
+
+## Bootstrap Summary
+
+```{python bootstrap-summary}
+# Get summary DataFrame with CIs for all edges
+summary = boot.summary()
+
+# Show edges with the largest weights
+print("Top 10 Edges by Weight (with 95% CI):")
+top_edges = summary.nlargest(10, 'estimate')[['from', 'to', 'estimate', 'ci_lower', 'ci_upper', 'se']]
+print(top_edges.to_string(index=False))
+```
+
+## Significant Edges
+
+```{python significant-edges}
+# Find edges significantly different from 0
+sig_edges = boot.significant_edges(threshold=0)
+print(f"\nNumber of significant edges (CI excludes 0): {len(sig_edges)}")
+
+# Find edges significantly greater than 0.1
+sig_edges_high = boot.significant_edges(threshold=0.1)
+print(f"Number of edges significantly > 0.1: {len(sig_edges_high)}")
+
+print("\nEdges with weight significantly > 0.1:")
+for from_state, to_state, estimate in sig_edges_high[:10]:
+    print(f"  {from_state} -> {to_state}: {estimate:.3f}")
+```
+
+## Visualize Bootstrap Results
+
+```{python bootstrap-plot-weights, fig.width=14, fig.height=5}
+# Plot bootstrap results for weights
+fig = tna.plot_bootstrap(boot, plot_type='weights')
+plt.suptitle('Bootstrap Analysis of Transition Weights', fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+# Bootstrap Centralities
+
+Bootstrap can also quantify uncertainty in centrality measures.
+
+```{python bootstrap-centralities}
+# Bootstrap centrality measures
+cent_ci = tna.bootstrap_centralities(
+    df,
+    measures=['OutStrength', 'InStrength', 'Betweenness', 'Diffusion'],
+    n_boot=300,
+    ci=0.95,
+    seed=42
+)
+
+print("Centrality Bootstrap Results:")
+print(cent_ci.to_string(index=False))
+```
+
+```{python bootstrap-centrality-plot, fig.width=10, fig.height=6}
+# Visualize bootstrap distribution for a specific centrality
+fig = tna.plot_bootstrap(boot, plot_type='centrality', measure='OutStrength')
+plt.show()
+```
+
+## Centrality Ranking with Confidence
+
+```{python centrality-ranking}
+# Focus on OutStrength with CIs
+out_strength = cent_ci[cent_ci['measure'] == 'OutStrength'].copy()
+out_strength = out_strength.sort_values('estimate', ascending=False)
+
+print("\nOutStrength Ranking with 95% CI:")
+print(out_strength[['state', 'estimate', 'ci_lower', 'ci_upper', 'se']].to_string(index=False))
+
+# Check for overlapping CIs (unclear rankings)
+print("\nNote: States with overlapping CIs have uncertain relative rankings")
+```
+
+---
+
+# Network Plot with Confidence Intervals
+
+```{python network-ci-plot, fig.width=10, fig.height=10}
+# Network visualization with edge significance
+ax = tna.plot_network_ci(
+    boot,
+    edge_alpha='significance',  # Fade non-significant edges
+    layout='circular',
+    figsize=(10, 10)
+)
+plt.show()
+```
+
+---
+
+# Permutation Tests for Group Comparison
+
+Permutation tests compare TNA models between two groups by randomly shuffling group labels.
+
+## Create Two Groups
+
+```{python create-groups}
+# Split data into two groups (e.g., high vs low achievers)
+# For demonstration, we'll split by row index
+n = len(df)
+df_group1 = df.iloc[:n//2]  # First half
+df_group2 = df.iloc[n//2:]  # Second half
+
+print(f"Group 1: {len(df_group1)} sequences")
+print(f"Group 2: {len(df_group2)} sequences")
+
+# Build models for each group
+model1 = tna.tna(df_group1)
+model2 = tna.tna(df_group2)
+```
+
+## Compare Transition Weights
+
+```{python permutation-weights}
+# Permutation test comparing overall weight matrices
+result_weights = tna.permutation_test(
+    df_group1, df_group2,
+    n_perm=500,
+    statistic='weights',  # Frobenius norm of weight difference
+    alternative='two-sided',
+    seed=42
+)
+
+print("Permutation Test Results (Weight Matrices):")
+print(f"  Observed statistic: {result_weights.observed:.4f}")
+print(f"  P-value: {result_weights.p_value:.4f}")
+print(f"  Significant at alpha=0.05: {result_weights.is_significant(0.05)}")
+```
+
+```{python permutation-weights-plot, fig.width=8, fig.height=6}
+# Visualize permutation test results
+ax = tna.plot_permutation(result_weights)
+plt.show()
+```
+
+## Compare Network Density
+
+```{python permutation-density}
+# Test for difference in network density
+result_density = tna.permutation_test(
+    df_group1, df_group2,
+    n_perm=500,
+    statistic='density',
+    seed=42
+)
+
+print("Permutation Test Results (Network Density):")
+print(f"  Observed difference: {result_density.observed:.4f}")
+print(f"  P-value: {result_density.p_value:.4f}")
+print(f"  Significant: {result_density.is_significant(0.05)}")
+```
+
+## Compare Centrality Measures
+
+```{python permutation-centrality}
+# Test for difference in OutStrength centrality
+result_cent = tna.permutation_test(
+    df_group1, df_group2,
+    n_perm=500,
+    statistic='centrality',
+    measure='OutStrength',
+    seed=42
+)
+
+print("Permutation Test Results (OutStrength Centrality):")
+print(f"  Observed difference: {result_cent.observed:.4f}")
+print(f"  P-value: {result_cent.p_value:.4f}")
+print(f"  Significant: {result_cent.is_significant(0.05)}")
+```
+
+---
+
+# Edge-wise Permutation Tests
+
+Test each edge individually for significant differences between groups.
+
+```{python edge-wise-test}
+# Edge-wise permutation tests with FDR correction
+edges = tna.permutation_test_edges(
+    df_group1, df_group2,
+    n_perm=500,
+    correction='fdr',  # False Discovery Rate correction
+    seed=42
+)
+
+print(f"Total edges tested: {len(edges)}")
+print(f"Significant edges (FDR-corrected p < 0.05): {edges['significant'].sum()}")
+```
+
+```{python significant-edges-table}
+# Show significant edges
+sig_edges_df = edges[edges['significant']].sort_values('p_adjusted')
+
+if len(sig_edges_df) > 0:
+    print("\nSignificant Edge Differences:")
+    print(sig_edges_df[['from', 'to', 'diff', 'p_value', 'p_adjusted']].head(15).to_string(index=False))
+else:
+    print("\nNo significant edge differences found after FDR correction.")
+    print("\nEdges with lowest p-values (before correction):")
+    print(edges.nsmallest(10, 'p_value')[['from', 'to', 'diff', 'p_value', 'p_adjusted']].to_string(index=False))
+```
+
+## Compare Correction Methods
+
+```{python correction-comparison}
+# Compare different multiple testing corrections
+edges_bonf = tna.permutation_test_edges(df_group1, df_group2, n_perm=200, correction='bonferroni', seed=42)
+edges_fdr = tna.permutation_test_edges(df_group1, df_group2, n_perm=200, correction='fdr', seed=42)
+edges_none = tna.permutation_test_edges(df_group1, df_group2, n_perm=200, correction='none', seed=42)
+
+print("Significant Edges by Correction Method:")
+print(f"  No correction:    {edges_none['significant'].sum()} edges")
+print(f"  FDR (BH):         {edges_fdr['significant'].sum()} edges")
+print(f"  Bonferroni:       {edges_bonf['significant'].sum()} edges")
+```
+
+---
+
+# Confidence Interval Methods
+
+The package provides multiple methods for computing confidence intervals.
+
+## Percentile Method
+
+```{python ci-percentile}
+# Generate bootstrap samples
+np.random.seed(42)
+data = np.random.normal(10, 2, 100)
+boot_samples = np.array([np.mean(np.random.choice(data, len(data), replace=True))
+                         for _ in range(1000)])
+
+# Percentile CI (most common)
+ci_pct = tna.confidence_interval(boot_samples, ci=0.95, method='percentile')
+print(f"Percentile 95% CI: ({ci_pct[0]:.3f}, {ci_pct[1]:.3f})")
+print(f"Point estimate (mean): {np.mean(data):.3f}")
+```
+
+## Basic Bootstrap Method
+
+```{python ci-basic}
+# Basic bootstrap CI (bias-corrected)
+ci_basic = tna.confidence_interval(boot_samples, ci=0.95, method='basic')
+print(f"Basic 95% CI: ({ci_basic[0]:.3f}, {ci_basic[1]:.3f})")
+```
+
+## BCa Method (Bias-Corrected and Accelerated)
+
+```{python ci-bca}
+# BCa CI - better for skewed distributions
+ci_bca = tna.bca_ci(
+    data,
+    boot_samples,
+    statistic_func=np.mean,
+    ci=0.95
+)
+print(f"BCa 95% CI: ({ci_bca[0]:.3f}, {ci_bca[1]:.3f})")
+
+print("\nComparison of CI Methods:")
+print(f"  Percentile: width = {ci_pct[1] - ci_pct[0]:.3f}")
+print(f"  Basic:      width = {ci_basic[1] - ci_basic[0]:.3f}")
+print(f"  BCa:        width = {ci_bca[1] - ci_bca[0]:.3f}")
+```
+
+---
+
+# Complete Workflow Example
+
+Here's a complete example of statistical inference for comparing two groups.
+
+```{python complete-workflow, fig.width=14, fig.height=10}
+# 1. Create two groups with potentially different patterns
+np.random.seed(123)
+
+# Simulate high-achievers (more plan -> monitor -> adapt cycles)
+high_achievers = df.sample(500, random_state=42)
+
+# Simulate low-achievers (more discuss -> emotion patterns)
+low_achievers = df.sample(500, random_state=123)
+
+# 2. Bootstrap analysis for each group
+boot_high = tna.bootstrap_tna(high_achievers, n_boot=200, seed=42)
+boot_low = tna.bootstrap_tna(low_achievers, n_boot=200, seed=42)
+
+# 3. Permutation test for group comparison
+perm_result = tna.permutation_test(
+    high_achievers, low_achievers,
+    n_perm=300,
+    statistic='weights',
+    seed=42
+)
+
+# 4. Edge-wise comparison
+edge_results = tna.permutation_test_edges(
+    high_achievers, low_achievers,
+    n_perm=200,
+    correction='fdr',
+    seed=42
+)
+
+# 5. Visualize results
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+# Plot 1: High achievers network
+ax1 = axes[0, 0]
+tna.plot_network_ci(boot_high, edge_alpha='significance', ax=ax1)
+ax1.set_title('High Achievers Network (95% CI)', fontweight='bold')
+
+# Plot 2: Low achievers network
+ax2 = axes[0, 1]
+tna.plot_network_ci(boot_low, edge_alpha='significance', ax=ax2)
+ax2.set_title('Low Achievers Network (95% CI)', fontweight='bold')
+
+# Plot 3: Permutation test
+ax3 = axes[1, 0]
+tna.plot_permutation(perm_result, ax=ax3)
+ax3.set_title('Permutation Test: Weight Difference', fontweight='bold')
+
+# Plot 4: Edge difference heatmap
+ax4 = axes[1, 1]
+model_high = tna.tna(high_achievers)
+model_low = tna.tna(low_achievers)
+diff_matrix = model_high.weights - model_low.weights
+
+im = ax4.imshow(diff_matrix, cmap='RdBu_r', vmin=-0.15, vmax=0.15)
+ax4.set_xticks(range(len(model_high.labels)))
+ax4.set_yticks(range(len(model_high.labels)))
+ax4.set_xticklabels(model_high.labels, rotation=45, ha='right')
+ax4.set_yticklabels(model_high.labels)
+ax4.set_title('Weight Difference (High - Low)', fontweight='bold')
+plt.colorbar(im, ax=ax4, shrink=0.8)
+
+plt.tight_layout()
+plt.show()
+
+# 6. Summary statistics
+print("\n" + "="*60)
+print("STATISTICAL INFERENCE SUMMARY")
+print("="*60)
+print(f"\nPermutation Test (overall weight difference):")
+print(f"  Observed: {perm_result.observed:.4f}")
+print(f"  P-value:  {perm_result.p_value:.4f}")
+print(f"  Conclusion: {'Groups differ significantly' if perm_result.is_significant(0.05) else 'No significant difference'}")
+
+print(f"\nEdge-wise Tests (FDR-corrected):")
+print(f"  Significant edges: {edge_results['significant'].sum()} / {len(edge_results)}")
+
+if edge_results['significant'].sum() > 0:
+    print("\n  Top significant edges:")
+    for _, row in edge_results[edge_results['significant']].nsmallest(5, 'p_adjusted').iterrows():
+        direction = "Higher in High" if row['diff'] > 0 else "Higher in Low"
+        print(f"    {row['from']} -> {row['to']}: diff={row['diff']:.3f} ({direction})")
+```
+
+---
+
+# Best Practices
+
+## Choosing Number of Replicates
+
+```{python best-practices}
+print("Recommended Number of Replicates:")
+print("="*50)
+print("Bootstrap (n_boot):")
+print("  - Quick exploration: 200-500")
+print("  - Publication quality: 1000-2000")
+print("  - Precise CI estimation: 5000+")
+print()
+print("Permutation (n_perm):")
+print("  - Quick check: 500")
+print("  - Standard analysis: 1000")
+print("  - Precise p-values: 5000-10000")
+print()
+print("Note: More replicates = more precise but slower")
+```
+
+## Reproducibility
+
+```{python reproducibility}
+# Always set seed for reproducible results
+result1 = tna.bootstrap_tna(df.head(200), n_boot=50, seed=12345)
+result2 = tna.bootstrap_tna(df.head(200), n_boot=50, seed=12345)
+
+# Results should be identical
+print("Reproducibility check:")
+print(f"  Weights CI match: {np.allclose(result1.weights_ci[0], result2.weights_ci[0])}")
+```
+
+---
+
+# Summary
+
+This document demonstrated the statistical inference capabilities of the Python TNA package:
+
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `bootstrap_tna()` | CI for model parameters | BootstrapResult |
+| `bootstrap_centralities()` | CI for centrality measures | DataFrame |
+| `permutation_test()` | Compare two groups | PermutationResult |
+| `permutation_test_edges()` | Edge-wise group comparison | DataFrame |
+| `confidence_interval()` | Calculate CI from samples | tuple |
+| `bca_ci()` | BCa confidence interval | tuple |
+| `plot_bootstrap()` | Visualize bootstrap results | Figure |
+| `plot_permutation()` | Visualize null distribution | Axes |
+| `plot_network_ci()` | Network with significance | Axes |
+
+These tools enable rigorous statistical analysis of transition networks, including uncertainty quantification and hypothesis testing.
+
+---
+
+# Session Info
+
+```{python session-info}
+import sys
+print(f"Python version: {sys.version}")
+print(f"NumPy version: {np.__version__}")
+print(f"Pandas version: {pd.__version__}")
+print(f"TNA version: {tna.__version__}")
+```

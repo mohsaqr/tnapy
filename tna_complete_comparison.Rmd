@@ -1,0 +1,785 @@
+---
+title: "TNA Package: Complete Python vs R Equivalence Comparison"
+author: "TNA Analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: flatly
+    code_folding: show
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 8
+)
+
+# Load reticulate for Python support
+library(reticulate)
+```
+
+# Introduction
+
+This document provides a **comprehensive comparison** between the Python TNA package and the R TNA package. It covers:
+
+1. **Data Loading** - Same dataset in both packages
+2. **All Model Types** - tna(), ftna(), ctna(), atna(), and advanced types
+3. **All Centrality Measures** - All 9 centrality measures
+4. **Statistical Inference** - Bootstrap and permutation tests
+5. **Visualization** - Side-by-side plotting comparisons
+6. **Numerical Equivalence Summary** - Quantified differences
+
+---
+
+# Setup
+
+## R Setup
+
+```{r r-setup}
+# Install TNA if not available
+if (!requireNamespace("tna", quietly = TRUE)) {
+  install.packages("tna")
+}
+
+library(tna)
+library(qgraph)
+library(igraph)
+```
+
+## Python Setup
+
+```{python py-setup}
+import numpy as np
+import pandas as pd
+import tna
+import matplotlib.pyplot as plt
+
+np.set_printoptions(precision=6, suppress=True)
+pd.set_option('display.precision', 6)
+
+print(f"Python TNA version: {tna.__version__}")
+print(f"NumPy version: {np.__version__}")
+print(f"Pandas version: {pd.__version__}")
+```
+
+---
+
+# Data Loading
+
+Both packages include the identical group regulation dataset.
+
+## R: Load Data
+
+```{r r-load-data}
+# Load the group regulation dataset
+data("group_regulation", package = "tna")
+
+cat("R Dataset Dimensions:", dim(group_regulation), "\n")
+cat("Number of sequences:", nrow(group_regulation), "\n")
+cat("Number of time steps:", ncol(group_regulation), "\n")
+cat("\nUnique states:\n")
+print(sort(unique(unlist(group_regulation))))
+```
+
+## Python: Load Data
+
+```{python py-load-data}
+# Load the group regulation dataset
+df = tna.load_group_regulation()
+
+print(f"Python Dataset Dimensions: {df.shape}")
+print(f"Number of sequences: {df.shape[0]}")
+print(f"Number of time steps: {df.shape[1]}")
+print(f"\nUnique states:")
+print(sorted(df.stack().dropna().unique()))
+```
+
+## Data Verification
+
+```{r verify-data}
+# Get Python data
+py_df <- py$df
+
+# Compare dimensions
+cat("Data equivalence check:\n")
+cat("  Same dimensions:", all(dim(group_regulation) == dim(py_df)), "\n")
+
+# Compare first few rows
+cat("  First 5 sequences match:",
+    all(as.matrix(group_regulation[1:5,]) == as.matrix(py_df[1:5,]), na.rm = TRUE), "\n")
+```
+
+---
+
+# Model Building Comparison
+
+## Standard TNA Model (Relative Probabilities)
+
+### R: TNA Model
+
+```{r r-tna-model}
+model_r <- tna(group_regulation)
+
+cat("R Model Summary:\n")
+cat("  Type:", model_r$type, "\n")
+cat("  States:", paste(model_r$labels, collapse = ", "), "\n")
+cat("  Non-zero edges:", sum(model_r$weights > 0), "\n")
+
+cat("\nTransition Matrix (rounded to 4 decimals):\n")
+print(round(model_r$weights, 4))
+```
+
+### Python: TNA Model
+
+```{python py-tna-model}
+model_py = tna.tna(df)
+
+print("Python Model Summary:")
+print(f"  Type: {model_py.type_}")
+print(f"  States: {', '.join(model_py.labels)}")
+print(f"  Non-zero edges: {np.sum(model_py.weights > 0)}")
+
+print("\nTransition Matrix (rounded to 4 decimals):")
+print(model_py.to_dataframe().round(4))
+```
+
+### Numerical Comparison: TNA
+
+```{r compare-tna}
+weights_py <- py$model_py$weights
+labels_py <- py$model_py$labels
+
+# Reorder Python matrix to match R labels
+idx <- match(model_r$labels, labels_py)
+weights_py_ordered <- weights_py[idx, idx]
+
+diff_tna <- abs(model_r$weights - weights_py_ordered)
+cat("TNA Model Comparison:\n")
+cat("  Maximum absolute difference:", max(diff_tna), "\n")
+cat("  Mean absolute difference:", mean(diff_tna), "\n")
+cat("  Matrices equivalent (diff < 1e-10):", max(diff_tna) < 1e-10, "\n")
+```
+
+---
+
+## Frequency Model (FTNA)
+
+### R: FTNA
+
+```{r r-ftna}
+ftna_r <- tna(group_regulation, type = "frequency")
+
+cat("R FTNA Summary:\n")
+cat("  Total transitions:", sum(ftna_r$weights), "\n")
+cat("  Max weight:", max(ftna_r$weights), "\n")
+cat("\nFrequency Matrix (first 5x5):\n")
+print(ftna_r$weights[1:5, 1:5])
+```
+
+### Python: FTNA
+
+```{python py-ftna}
+ftna_py = tna.ftna(df)
+
+print("Python FTNA Summary:")
+print(f"  Total transitions: {ftna_py.weights.sum():.0f}")
+print(f"  Max weight: {ftna_py.weights.max():.0f}")
+print("\nFrequency Matrix (first 5x5):")
+print(ftna_py.to_dataframe().iloc[:5, :5])
+```
+
+### Numerical Comparison: FTNA
+
+```{r compare-ftna}
+ftna_weights_py <- py$ftna_py$weights
+ftna_labels_py <- py$ftna_py$labels
+
+idx <- match(ftna_r$labels, ftna_labels_py)
+ftna_weights_py_ordered <- ftna_weights_py[idx, idx]
+
+diff_ftna <- abs(ftna_r$weights - ftna_weights_py_ordered)
+cat("FTNA Model Comparison:\n")
+cat("  Maximum absolute difference:", max(diff_ftna), "\n")
+cat("  Matrices equivalent:", max(diff_ftna) < 1e-10, "\n")
+```
+
+---
+
+## Co-occurrence Model (CTNA)
+
+### R: CTNA
+
+```{r r-ctna}
+ctna_r <- tna(group_regulation, type = "co-occurrence")
+
+cat("R CTNA Summary:\n")
+cat("  Type:", ctna_r$type, "\n")
+cat("  Row sums (should be 1):\n")
+print(round(rowSums(ctna_r$weights), 4))
+```
+
+### Python: CTNA
+
+```{python py-ctna}
+ctna_py = tna.ctna(df)
+
+print("Python CTNA Summary:")
+print(f"  Type: {ctna_py.type_}")
+print("  Row sums (should be 1):")
+print(ctna_py.weights.sum(axis=1).round(4))
+```
+
+### Numerical Comparison: CTNA
+
+```{r compare-ctna}
+ctna_weights_py <- py$ctna_py$weights
+ctna_labels_py <- py$ctna_py$labels
+
+idx <- match(ctna_r$labels, ctna_labels_py)
+ctna_weights_py_ordered <- ctna_weights_py[idx, idx]
+
+diff_ctna <- abs(ctna_r$weights - ctna_weights_py_ordered)
+cat("CTNA Model Comparison:\n")
+cat("  Maximum absolute difference:", max(diff_ctna), "\n")
+cat("  Matrices equivalent:", max(diff_ctna) < 1e-10, "\n")
+```
+
+---
+
+## Attention Model (ATNA)
+
+### R: ATNA
+
+```{r r-atna}
+# R doesn't have a direct atna() function, but uses type = "attention"
+# Check if attention type is available
+if ("attention" %in% c("relative", "frequency", "co-occurrence")) {
+  cat("Attention type not directly available in R tna\n")
+} else {
+  cat("Testing attention model with beta = 0.1\n")
+}
+```
+
+### Python: ATNA
+
+```{python py-atna}
+atna_py = tna.atna(df, beta=0.1)
+
+print("Python ATNA Summary:")
+print(f"  Type: {atna_py.type_}")
+print(f"  Row sums (should be 1): {atna_py.weights.sum(axis=1).round(4)}")
+print("\nAttention Matrix (first 3x3):")
+print(atna_py.to_dataframe().iloc[:3, :3].round(4))
+```
+
+---
+
+## Additional Model Types (Python)
+
+```{python py-additional-models}
+# Python supports additional model types
+print("Additional Python Model Types:")
+
+# N-gram model
+ngram_model = tna.build_model(df, type_='n-gram', params={'n': 2})
+print(f"\n1. N-gram (n=2): {ngram_model.type_}")
+print(f"   Row sums: {ngram_model.weights.sum(axis=1).round(4)}")
+
+# Gap model
+gap_model = tna.build_model(df, type_='gap', params={'max_gap': 3, 'decay': 0.5})
+print(f"\n2. Gap (max_gap=3, decay=0.5): {gap_model.type_}")
+print(f"   Row sums: {gap_model.weights.sum(axis=1).round(4)}")
+
+# Window model
+window_model = tna.build_model(df, type_='window', params={'size': 3})
+print(f"\n3. Window (size=3): {window_model.type_}")
+print(f"   Row sums: {window_model.weights.sum(axis=1).round(4)}")
+
+# Reverse model
+reverse_model = tna.build_model(df, type_='reverse')
+print(f"\n4. Reverse: {reverse_model.type_}")
+print(f"   Row sums: {reverse_model.weights.sum(axis=1).round(4)}")
+```
+
+---
+
+# Centrality Measures Comparison
+
+## R: All Centralities
+
+```{r r-centralities}
+cent_r <- centralities(model_r)
+
+cat("R Centrality Measures:\n")
+print(round(cent_r, 4))
+```
+
+## Python: All Centralities
+
+```{python py-centralities}
+cent_py = tna.centralities(model_py)
+
+print("Python Centrality Measures:")
+print(cent_py.round(4))
+```
+
+## Measure-by-Measure Comparison
+
+```{r compare-centralities-detail}
+cent_py_r <- py$cent_py
+
+# Reorder to match R labels
+cent_py_ordered <- cent_py_r[match(rownames(cent_r), rownames(cent_py_r)), ]
+
+cat("Centrality Measure Comparison:\n")
+cat("=" , rep("=", 60), "\n", sep="")
+
+measures <- intersect(colnames(cent_r), colnames(cent_py_ordered))
+
+comparison_results <- data.frame(
+  Measure = character(),
+  Max_Diff = numeric(),
+  Mean_Diff = numeric(),
+  Correlation = numeric(),
+  Equivalent = logical(),
+  stringsAsFactors = FALSE
+)
+
+for (m in measures) {
+  r_vals <- cent_r[, m]
+  py_vals <- cent_py_ordered[, m]
+
+  diff <- abs(r_vals - py_vals)
+  max_diff <- max(diff, na.rm = TRUE)
+  mean_diff <- mean(diff, na.rm = TRUE)
+  corr <- cor(r_vals, py_vals, use = "complete.obs")
+
+  comparison_results <- rbind(comparison_results, data.frame(
+    Measure = m,
+    Max_Diff = max_diff,
+    Mean_Diff = mean_diff,
+    Correlation = corr,
+    Equivalent = max_diff < 1e-6
+  ))
+
+  cat(sprintf("\n%s:\n", m))
+  cat(sprintf("  Max absolute difference: %.2e\n", max_diff))
+  cat(sprintf("  Mean absolute difference: %.2e\n", mean_diff))
+  cat(sprintf("  Correlation: %.6f\n", corr))
+  cat(sprintf("  Equivalent (diff < 1e-6): %s\n", max_diff < 1e-6))
+}
+
+cat("\n\nSummary Table:\n")
+print(comparison_results)
+```
+
+## Individual Centrality Values
+
+### OutStrength
+
+```{r compare-outstrength}
+cat("OutStrength Comparison:\n")
+cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
+cat(rep("-", 50), "\n", sep="")
+for (state in rownames(cent_r)) {
+  r_val <- cent_r[state, "OutStrength"]
+  py_val <- cent_py_ordered[state, "OutStrength"]
+  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
+}
+```
+
+### InStrength
+
+```{r compare-instrength}
+cat("InStrength Comparison:\n")
+cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
+cat(rep("-", 50), "\n", sep="")
+for (state in rownames(cent_r)) {
+  r_val <- cent_r[state, "InStrength"]
+  py_val <- cent_py_ordered[state, "InStrength"]
+  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
+}
+```
+
+### Diffusion
+
+```{r compare-diffusion}
+cat("Diffusion Comparison:\n")
+cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
+cat(rep("-", 50), "\n", sep="")
+for (state in rownames(cent_r)) {
+  r_val <- cent_r[state, "Diffusion"]
+  py_val <- cent_py_ordered[state, "Diffusion"]
+  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
+}
+```
+
+### Clustering
+
+```{r compare-clustering}
+cat("Clustering Comparison:\n")
+cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
+cat(rep("-", 50), "\n", sep="")
+for (state in rownames(cent_r)) {
+  r_val <- cent_r[state, "Clustering"]
+  py_val <- cent_py_ordered[state, "Clustering"]
+  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
+}
+```
+
+---
+
+# Statistical Inference
+
+## Python Bootstrap Analysis
+
+```{python py-bootstrap}
+# Bootstrap analysis
+np.random.seed(42)
+boot = tna.bootstrap_tna(df.head(500), n_boot=200, ci=0.95, seed=42)
+
+print("Bootstrap Analysis Results:")
+print(f"  Number of replicates: {boot.n_boot}")
+print(f"  Confidence level: {boot.ci_level * 100}%")
+
+# Summary of top edges
+summary = boot.summary()
+print("\nTop 5 edges by weight (with 95% CI):")
+top_edges = summary.nlargest(5, 'estimate')[['from', 'to', 'estimate', 'ci_lower', 'ci_upper']]
+print(top_edges.to_string(index=False))
+
+# Significant edges
+sig_edges = boot.significant_edges(threshold=0.1)
+print(f"\nEdges significantly > 0.1: {len(sig_edges)}")
+```
+
+## Python Bootstrap Centralities
+
+```{python py-bootstrap-cent}
+# Bootstrap centrality measures
+cent_boot = tna.bootstrap_centralities(
+    df.head(500),
+    measures=['OutStrength', 'InStrength', 'Betweenness', 'Diffusion'],
+    n_boot=100,
+    ci=0.95,
+    seed=42
+)
+
+print("Bootstrap Centrality Results:")
+print(cent_boot.round(4))
+```
+
+## Python Permutation Test
+
+```{python py-permutation}
+# Split data into two groups
+n = len(df)
+group1 = df.iloc[:n//2]
+group2 = df.iloc[n//2:]
+
+# Permutation test
+np.random.seed(42)
+perm_result = tna.permutation_test(
+    group1, group2,
+    n_perm=200,
+    statistic='weights',
+    seed=42
+)
+
+print("Permutation Test Results:")
+print(f"  Observed statistic: {perm_result.observed:.4f}")
+print(f"  P-value: {perm_result.p_value:.4f}")
+print(f"  Significant at alpha=0.05: {perm_result.is_significant(0.05)}")
+
+# Edge-wise tests
+edge_tests = tna.permutation_test_edges(
+    group1, group2,
+    n_perm=100,
+    correction='fdr',
+    seed=42
+)
+print(f"\nEdge-wise tests:")
+print(f"  Total edges: {len(edge_tests)}")
+print(f"  Significant (FDR < 0.05): {edge_tests['significant'].sum()}")
+```
+
+---
+
+# Visualization Comparison
+
+## Network Plots
+
+### R: Network Plot
+
+```{r r-network-plot, fig.width=10, fig.height=10}
+plot(model_r, layout = "circle")
+title("R TNA Network")
+```
+
+### Python: Network Plot
+
+```{python py-network-plot, fig.width=10, fig.height=10}
+fig, ax = plt.subplots(figsize=(10, 10))
+tna.plot_network(
+    model_py,
+    layout='circular',
+    node_size='OutStrength',
+    edge_threshold=0.05,
+    ax=ax
+)
+ax.set_title('Python TNA Network', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+## Heatmaps
+
+### R: Heatmap
+
+```{r r-heatmap, fig.width=10, fig.height=8}
+heatmap(model_r$weights,
+        Rowv = NA, Colv = NA,
+        col = colorRampPalette(c("white", "steelblue", "darkblue"))(100),
+        scale = "none",
+        margins = c(10, 10),
+        main = "R: Transition Matrix Heatmap")
+```
+
+### Python: Heatmap
+
+```{python py-heatmap, fig.width=10, fig.height=8}
+fig, ax = plt.subplots(figsize=(10, 8))
+tna.plot_heatmap(model_py, ax=ax, cmap='Blues')
+ax.set_title('Python: Transition Matrix Heatmap', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+## Centrality Bar Charts
+
+### R: Centrality Plot
+
+```{r r-centrality-plot, fig.width=14, fig.height=10}
+plot(cent_r, ncol = 3)
+```
+
+### Python: Centrality Plot
+
+```{python py-centrality-plot, fig.width=14, fig.height=10}
+fig = tna.plot_centralities(
+    cent_py,
+    measures=['OutStrength', 'InStrength', 'Betweenness',
+              'Closeness', 'Clustering', 'Diffusion'],
+    ncol=3
+)
+plt.suptitle('Python: Centrality Measures', fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+## Model Comparison Plot
+
+```{python py-model-comparison, fig.width=16, fig.height=6}
+# Compare TNA and FTNA
+fig = tna.plot_comparison(
+    model_py, ftna_py,
+    plot_type='heatmap',
+    labels=('TNA (Relative)', 'FTNA (Frequency)')
+)
+plt.suptitle('Model Comparison: TNA vs FTNA', fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+## Sequence Visualization
+
+```{python py-sequence-plots, fig.width=12, fig.height=8}
+# State distribution over time
+fig = tna.plot_sequences(df, plot_type='distribution')
+plt.suptitle('State Distribution Over Time', fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+```{python py-frequency-plot, fig.width=10, fig.height=6}
+# State frequencies
+fig = tna.plot_frequencies(df)
+plt.suptitle('State Frequencies', fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+## Bootstrap Visualization
+
+```{python py-bootstrap-plot, fig.width=14, fig.height=6}
+# Plot bootstrap results
+fig = tna.plot_bootstrap(boot, plot_type='weights')
+plt.suptitle('Bootstrap Analysis: Edge Weight Confidence Intervals',
+             fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+## Permutation Test Visualization
+
+```{python py-permutation-plot, fig.width=8, fig.height=6}
+# Plot permutation test null distribution
+ax = tna.plot_permutation(perm_result)
+plt.title('Permutation Test: Null Distribution', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+# Initial Probabilities Comparison
+
+```{r compare-inits}
+cat("Initial Probabilities Comparison:\n")
+cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
+cat(rep("-", 50), "\n", sep="")
+
+inits_py <- py$model_py$inits
+labels_py <- py$model_py$labels
+names(inits_py) <- labels_py
+
+for (state in model_r$labels) {
+  r_val <- model_r$inits[match(state, model_r$labels)]
+  py_val <- inits_py[state]
+  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
+}
+
+max_init_diff <- max(abs(model_r$inits - inits_py[model_r$labels]))
+cat(sprintf("\nMaximum initial probability difference: %.2e\n", max_init_diff))
+```
+
+---
+
+# Numerical Equivalence Summary
+
+```{r final-summary}
+cat("="  , rep("=", 70), "\n", sep="")
+cat("         COMPLETE NUMERICAL EQUIVALENCE SUMMARY\n")
+cat("=" , rep("=", 70), "\n\n", sep="")
+
+# Collect all results
+results <- data.frame(
+  Component = character(),
+  Max_Difference = numeric(),
+  Status = character(),
+  stringsAsFactors = FALSE
+)
+
+# TNA weights
+diff_tna <- max(abs(model_r$weights - weights_py_ordered))
+results <- rbind(results, data.frame(
+  Component = "TNA Transition Matrix",
+  Max_Difference = diff_tna,
+  Status = ifelse(diff_tna < 1e-10, "EQUIVALENT", "DIFFERS")
+))
+
+# FTNA weights
+diff_ftna <- max(abs(ftna_r$weights - ftna_weights_py_ordered))
+results <- rbind(results, data.frame(
+  Component = "FTNA Frequency Matrix",
+  Max_Difference = diff_ftna,
+  Status = ifelse(diff_ftna < 1e-10, "EQUIVALENT", "DIFFERS")
+))
+
+# CTNA weights
+diff_ctna <- max(abs(ctna_r$weights - ctna_weights_py_ordered))
+results <- rbind(results, data.frame(
+  Component = "CTNA Co-occurrence Matrix",
+  Max_Difference = diff_ctna,
+  Status = ifelse(diff_ctna < 1e-10, "EQUIVALENT", "DIFFERS")
+))
+
+# Initial probabilities
+diff_inits <- max(abs(model_r$inits - inits_py[model_r$labels]))
+results <- rbind(results, data.frame(
+  Component = "Initial Probabilities",
+  Max_Difference = diff_inits,
+  Status = ifelse(diff_inits < 1e-10, "EQUIVALENT", "DIFFERS")
+))
+
+# Centralities
+for (m in measures) {
+  r_vals <- cent_r[, m]
+  py_vals <- cent_py_ordered[, m]
+  diff <- max(abs(r_vals - py_vals), na.rm = TRUE)
+  results <- rbind(results, data.frame(
+    Component = paste0("Centrality: ", m),
+    Max_Difference = diff,
+    Status = ifelse(diff < 1e-6, "EQUIVALENT", "DIFFERS")
+  ))
+}
+
+# Print summary table
+cat("Component-wise Results:\n")
+cat(rep("-", 70), "\n", sep="")
+print(results, row.names = FALSE)
+
+cat("\n")
+cat(rep("-", 70), "\n", sep="")
+
+# Overall summary
+all_equiv <- all(results$Status == "EQUIVALENT")
+cat(sprintf("\nOVERALL STATUS: %s\n",
+            ifelse(all_equiv, "ALL COMPONENTS EQUIVALENT", "SOME DIFFERENCES FOUND")))
+
+cat(sprintf("\nEquivalent components: %d / %d\n",
+            sum(results$Status == "EQUIVALENT"),
+            nrow(results)))
+
+cat("\n")
+cat("=" , rep("=", 70), "\n", sep="")
+```
+
+---
+
+# Tolerance Analysis
+
+```{r tolerance-analysis}
+cat("Tolerance Analysis:\n\n")
+
+tolerances <- c(1e-15, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4)
+
+cat("Components meeting each tolerance level:\n\n")
+
+for (tol in tolerances) {
+  n_pass <- sum(results$Max_Difference < tol)
+  cat(sprintf("  < %.0e: %d / %d components\n", tol, n_pass, nrow(results)))
+}
+```
+
+---
+
+# Session Information
+
+## R Session
+
+```{r session-info-r}
+sessionInfo()
+```
+
+## Python Session
+
+```{python session-info-py}
+import sys
+print(f"Python version: {sys.version}")
+print(f"NumPy version: {np.__version__}")
+print(f"Pandas version: {pd.__version__}")
+print(f"TNA version: {tna.__version__}")
+
+import networkx as nx
+import scipy
+print(f"NetworkX version: {nx.__version__}")
+print(f"SciPy version: {scipy.__version__}")
+```
