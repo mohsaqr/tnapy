@@ -55,9 +55,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tna-python/tna"
-Documentation = "https://tna-python.readthedocs.io"
-Repository = "https://github.com/tna-python/tna"
+Homepage = "https://github.com/mohsaqr/tnapy"
+Documentation = "https://github.com/mohsaqr/tnapy#readme"
+Repository = "https://github.com/mohsaqr/tnapy"
+Issues = "https://github.com/mohsaqr/tnapy/issues"
 
 [tool.setuptools.packages.find]
 include = ["tna*"]
