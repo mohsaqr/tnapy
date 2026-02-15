@@ -106,17 +106,15 @@ print(sorted(df.stack().dropna().unique()))
 
 ## Data Verification
 
-```{r verify-data}
-# Get Python data
-py_df <- py$df
-
+```{python py-verify-data}
 # Compare dimensions
-cat("Data equivalence check:\n")
-cat("  Same dimensions:", all(dim(group_regulation) == dim(py_df)), "\n")
-
-# Compare first few rows
-cat("  First 5 sequences match:",
-    all(as.matrix(group_regulation[1:5,]) == as.matrix(py_df[1:5,]), na.rm = TRUE), "\n")
+import numpy as np
+r_shape = (r.group_regulation.shape[0], r.group_regulation.shape[1])
+py_shape = df.shape
+print(f"Data equivalence check:")
+print(f"  R dimensions: {r_shape}")
+print(f"  Python dimensions: {py_shape}")
+print(f"  Same dimensions: {r_shape == py_shape}")
 ```
 
 ---
@@ -155,19 +153,18 @@ print(model_py.to_dataframe().round(4))
 
 ### Numerical Comparison: TNA
 
-```{r compare-tna}
-weights_py <- py$model_py$weights
-labels_py <- py$model_py$labels
+```{python compare-tna}
+import numpy as np
 
-# Reorder Python matrix to match R labels
-idx <- match(model_r$labels, labels_py)
-weights_py_ordered <- weights_py[idx, idx]
+# Get R weights matrix
+r_weights = np.array(r.model_r["weights"])
+py_weights = model_py.weights
 
-diff_tna <- abs(model_r$weights - weights_py_ordered)
-cat("TNA Model Comparison:\n")
-cat("  Maximum absolute difference:", max(diff_tna), "\n")
-cat("  Mean absolute difference:", mean(diff_tna), "\n")
-cat("  Matrices equivalent (diff < 1e-10):", max(diff_tna) < 1e-10, "\n")
+diff_tna = np.abs(r_weights - py_weights)
+print("TNA Model Comparison:")
+print(f"  Maximum absolute difference: {diff_tna.max():.2e}")
+print(f"  Mean absolute difference: {diff_tna.mean():.2e}")
+print(f"  Matrices equivalent (diff < 1e-10): {diff_tna.max() < 1e-10}")
 ```
 
 ---
@@ -177,7 +174,7 @@ cat("  Matrices equivalent (diff < 1e-10):", max(diff_tna) < 1e-10, "\n")
 ### R: FTNA
 
 ```{r r-ftna}
-ftna_r <- tna(group_regulation, type = "frequency")
+ftna_r <- ftna(group_regulation)
 
 cat("R FTNA Summary:\n")
 cat("  Total transitions:", sum(ftna_r$weights), "\n")
@@ -200,17 +197,14 @@ print(ftna_py.to_dataframe().iloc[:5, :5])
 
 ### Numerical Comparison: FTNA
 
-```{r compare-ftna}
-ftna_weights_py <- py$ftna_py$weights
-ftna_labels_py <- py$ftna_py$labels
+```{python compare-ftna}
+r_ftna_weights = np.array(r.ftna_r["weights"])
+py_ftna_weights = ftna_py.weights
 
-idx <- match(ftna_r$labels, ftna_labels_py)
-ftna_weights_py_ordered <- ftna_weights_py[idx, idx]
-
-diff_ftna <- abs(ftna_r$weights - ftna_weights_py_ordered)
-cat("FTNA Model Comparison:\n")
-cat("  Maximum absolute difference:", max(diff_ftna), "\n")
-cat("  Matrices equivalent:", max(diff_ftna) < 1e-10, "\n")
+diff_ftna = np.abs(r_ftna_weights - py_ftna_weights)
+print("FTNA Model Comparison:")
+print(f"  Maximum absolute difference: {diff_ftna.max():.2e}")
+print(f"  Matrices equivalent: {diff_ftna.max() < 1e-10}")
 ```
 
 ---
@@ -220,7 +214,7 @@ cat("  Matrices equivalent:", max(diff_ftna) < 1e-10, "\n")
 ### R: CTNA
 
 ```{r r-ctna}
-ctna_r <- tna(group_regulation, type = "co-occurrence")
+ctna_r <- ctna(group_regulation)
 
 cat("R CTNA Summary:\n")
 cat("  Type:", ctna_r$type, "\n")
@@ -241,17 +235,14 @@ print(ctna_py.weights.sum(axis=1).round(4))
 
 ### Numerical Comparison: CTNA
 
-```{r compare-ctna}
-ctna_weights_py <- py$ctna_py$weights
-ctna_labels_py <- py$ctna_py$labels
+```{python compare-ctna}
+r_ctna_weights = np.array(r.ctna_r["weights"])
+py_ctna_weights = ctna_py.weights
 
-idx <- match(ctna_r$labels, ctna_labels_py)
-ctna_weights_py_ordered <- ctna_weights_py[idx, idx]
-
-diff_ctna <- abs(ctna_r$weights - ctna_weights_py_ordered)
-cat("CTNA Model Comparison:\n")
-cat("  Maximum absolute difference:", max(diff_ctna), "\n")
-cat("  Matrices equivalent:", max(diff_ctna) < 1e-10, "\n")
+diff_ctna = np.abs(r_ctna_weights - py_ctna_weights)
+print("CTNA Model Comparison:")
+print(f"  Maximum absolute difference: {diff_ctna.max():.2e}")
+print(f"  Matrices equivalent: {diff_ctna.max() < 1e-10}")
 ```
 
 ---
@@ -321,7 +312,9 @@ print(f"   Row sums: {reverse_model.weights.sum(axis=1).round(4)}")
 cent_r <- centralities(model_r)
 
 cat("R Centrality Measures:\n")
-print(round(cent_r, 4))
+cent_r_display <- cent_r
+cent_r_display[, -1] <- round(cent_r_display[, -1], 4)
+print(cent_r_display)
 ```
 
 ## Python: All Centralities
@@ -335,251 +328,198 @@ print(cent_py.round(4))
 
 ## Measure-by-Measure Comparison
 
-```{r compare-centralities-detail}
-cent_py_r <- py$cent_py
+```{python compare-centralities-detail}
+import pandas as pd
 
-# Reorder to match R labels
-cent_py_ordered <- cent_py_r[match(rownames(cent_r), rownames(cent_py_r)), ]
+# Get R centralities as numpy arrays
+r_cent_data = {}
+measures = ['OutStrength', 'InStrength', 'ClosenessIn', 'ClosenessOut',
+            'Closeness', 'Betweenness', 'BetweennessRSP', 'Diffusion', 'Clustering']
 
-cat("Centrality Measure Comparison:\n")
-cat("=" , rep("=", 60), "\n", sep="")
+for m in measures:
+    r_cent_data[m] = np.array(r.cent_r[m])
 
-measures <- intersect(colnames(cent_r), colnames(cent_py_ordered))
+print("Centrality Measure Comparison:")
+print("=" * 70)
 
-comparison_results <- data.frame(
-  Measure = character(),
-  Max_Diff = numeric(),
-  Mean_Diff = numeric(),
-  Correlation = numeric(),
-  Equivalent = logical(),
-  stringsAsFactors = FALSE
-)
+results = []
+for m in measures:
+    r_vals = r_cent_data[m]
+    py_vals = cent_py[m].values
 
-for (m in measures) {
-  r_vals <- cent_r[, m]
-  py_vals <- cent_py_ordered[, m]
+    diff = np.abs(r_vals - py_vals)
+    max_diff = diff.max()
+    mean_diff = diff.mean()
+    corr = np.corrcoef(r_vals, py_vals)[0, 1]
 
-  diff <- abs(r_vals - py_vals)
-  max_diff <- max(diff, na.rm = TRUE)
-  mean_diff <- mean(diff, na.rm = TRUE)
-  corr <- cor(r_vals, py_vals, use = "complete.obs")
+    results.append({
+        'Measure': m,
+        'Max_Diff': max_diff,
+        'Mean_Diff': mean_diff,
+        'Correlation': corr,
+        'Equivalent': max_diff < 1e-6
+    })
 
-  comparison_results <- rbind(comparison_results, data.frame(
-    Measure = m,
-    Max_Diff = max_diff,
-    Mean_Diff = mean_diff,
-    Correlation = corr,
-    Equivalent = max_diff < 1e-6
-  ))
+    print(f"\n{m}:")
+    print(f"  Max absolute difference: {max_diff:.2e}")
+    print(f"  Mean absolute difference: {mean_diff:.2e}")
+    print(f"  Correlation: {corr:.6f}")
+    print(f"  Equivalent (diff < 1e-6): {max_diff < 1e-6}")
 
-  cat(sprintf("\n%s:\n", m))
-  cat(sprintf("  Max absolute difference: %.2e\n", max_diff))
-  cat(sprintf("  Mean absolute difference: %.2e\n", mean_diff))
-  cat(sprintf("  Correlation: %.6f\n", corr))
-  cat(sprintf("  Equivalent (diff < 1e-6): %s\n", max_diff < 1e-6))
-}
-
-cat("\n\nSummary Table:\n")
-print(comparison_results)
+print("\n\nSummary Table:")
+print(pd.DataFrame(results).to_string(index=False))
 ```
 
 ## Individual Centrality Values
 
-### OutStrength
+```{python compare-individual-centralities}
+states = list(model_py.labels)
 
-```{r compare-outstrength}
-cat("OutStrength Comparison:\n")
-cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
-cat(rep("-", 50), "\n", sep="")
-for (state in rownames(cent_r)) {
-  r_val <- cent_r[state, "OutStrength"]
-  py_val <- cent_py_ordered[state, "OutStrength"]
-  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
-}
-```
+for measure in ['OutStrength', 'InStrength', 'Diffusion', 'Clustering']:
+    r_vals = r_cent_data[measure]
+    py_vals = cent_py[measure].values
 
-### InStrength
-
-```{r compare-instrength}
-cat("InStrength Comparison:\n")
-cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
-cat(rep("-", 50), "\n", sep="")
-for (state in rownames(cent_r)) {
-  r_val <- cent_r[state, "InStrength"]
-  py_val <- cent_py_ordered[state, "InStrength"]
-  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
-}
-```
-
-### Diffusion
-
-```{r compare-diffusion}
-cat("Diffusion Comparison:\n")
-cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
-cat(rep("-", 50), "\n", sep="")
-for (state in rownames(cent_r)) {
-  r_val <- cent_r[state, "Diffusion"]
-  py_val <- cent_py_ordered[state, "Diffusion"]
-  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
-}
-```
-
-### Clustering
-
-```{r compare-clustering}
-cat("Clustering Comparison:\n")
-cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
-cat(rep("-", 50), "\n", sep="")
-for (state in rownames(cent_r)) {
-  r_val <- cent_r[state, "Clustering"]
-  py_val <- cent_py_ordered[state, "Clustering"]
-  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
-}
+    print(f"\n{measure} Comparison:")
+    print(f"{'State':<12} {'R':>12} {'Python':>12} {'Diff':>12}")
+    print("-" * 50)
+    for i, state in enumerate(states):
+        print(f"{state:<12} {r_vals[i]:12.6f} {py_vals[i]:12.6f} {abs(r_vals[i] - py_vals[i]):12.2e}")
 ```
 
 ---
 
 # Statistical Inference
 
-## R Bootstrap Analysis
+## Bootstrap: R vs Python
 
 ```{r r-bootstrap}
 set.seed(42)
-boot_r <- bootstrap(model_r, iter = 100)
+boot_r <- bootstrap(model_r, iter = 1000)
 
-cat("R Bootstrap Results:\n")
-cat("  Iterations:", 100, "\n")
-cat("  Significant edges (alpha=0.05):", sum(boot_r$weights_sig > 0), "\n")
-cat("  P-values range:", range(boot_r$p_values), "\n")
+cat("R Bootstrap (iter=1000):\n")
+cat("  Significant edges:", sum(boot_r$weights_sig > 0), "\n")
 
-cat("\nR Bootstrap weights_mean (first row):\n")
-print(round(boot_r$weights_mean[1, ], 6))
-
-cat("\nR Bootstrap p_values (first row):\n")
-print(round(boot_r$p_values[1, ], 4))
+cat("\nR Significance Matrix (weights_sig):\n")
+print(round(boot_r$weights_sig, 4))
 ```
-
-## Python Bootstrap Analysis
 
 ```{python py-bootstrap}
-# Bootstrap analysis (matches R algorithm: per-sequence transition resampling)
-boot = tna.bootstrap_tna(model_py, iter=100, seed=42)
+boot = tna.bootstrap_tna(model_py, iter=1000, seed=42)
 
-print("Python Bootstrap Results:")
-print(f"  Iterations: {boot.iter}")
-print(f"  Method: {boot.method}")
+print(f"Python Bootstrap (iter={boot.iter}):")
+print(f"  Significant edges: {int((boot.weights_sig > 0).sum())}")
 
-# Summary of edges
-summary = boot.boot_summary
-print(f"\nSignificant edges: {(boot.weights_sig > 0).sum()}")
-print(f"P-values range: [{boot.p_values.min():.4f}, {boot.p_values.max():.4f}]")
-
-print(f"\nPython Bootstrap weights_mean (first row):")
-print(boot.weights_mean[0, :].round(6))
-
-print(f"\nPython Bootstrap p_values (first row):")
-print(boot.p_values[0, :].round(4))
+print("\nPython Significance Matrix (weights_sig):")
+print(pd.DataFrame(boot.weights_sig, index=boot.labels, columns=boot.labels).round(4))
 ```
 
-## Bootstrap Comparison
+```{python compare-bootstrap}
+r_boot_sig = np.array(r.boot_r["weights_sig"])
+r_boot_orig = np.array(r.boot_r["weights_orig"])
 
-```{r compare-bootstrap}
-boot_py_pvals <- py$boot$p_values
-boot_py_mean <- py$boot$weights_mean
-boot_py_sd <- py$boot$weights_sd
+# weights_orig must be identical (deterministic)
+orig_diff = np.abs(r_boot_orig - boot.weights_orig).max()
+print(f"weights_orig match (max diff): {orig_diff:.2e}")
 
-cat("Bootstrap Algorithm Comparison:\n")
-cat("Note: Exact values differ due to different RNGs (R vs NumPy),\n")
-cat("but the algorithm is identical (per-sequence transition resampling).\n\n")
+# Compare sig matrices: same edges identified as significant
+r_sig_mask = r_boot_sig > 0
+py_sig_mask = boot.weights_sig > 0
+agree = (r_sig_mask == py_sig_mask).sum()
+total = r_sig_mask.size
+print(f"Sig matrix agreement: {agree}/{total} edges ({100*agree/total:.1f}%)")
 
-cat("Structural equivalence checks:\n")
-cat("  Same shape:", all(dim(boot_r$p_values) == dim(boot_py_pvals)), "\n")
-cat("  Diagonal p-values > 1 (both):",
-    all(diag(boot_r$p_values) >= 1) & all(diag(boot_py_pvals) >= 1), "\n")
-cat("  Min p-value formula (1/(iter+1)):",
-    sprintf("R=%.6f, Py=%.6f", min(boot_r$p_values), min(boot_py_pvals)), "\n")
-cat("  weights_orig identical:",
-    max(abs(boot_r$weights_orig - py$boot$weights_orig)) < 1e-10, "\n")
+# Where they disagree
+if agree < total:
+    disagree_idx = np.argwhere(r_sig_mask != py_sig_mask)
+    labels = boot.labels
+    print(f"\nDisagreements ({total - agree} edges):")
+    for i, j in disagree_idx:
+        print(f"  {labels[i]} -> {labels[j]}: "
+              f"R={'sig' if r_sig_mask[i,j] else 'ns'}, "
+              f"Py={'sig' if py_sig_mask[i,j] else 'ns'}")
 ```
 
-## Python Bootstrap Centralities
+## Bootstrap Centralities
 
 ```{python py-bootstrap-cent}
-# Bootstrap centrality measures
 cent_boot = tna.bootstrap_centralities(
     model_py,
     measures=['OutStrength', 'InStrength', 'Betweenness', 'Diffusion'],
-    iter=100,
+    iter=1000,
     seed=42
 )
 
-print("Bootstrap Centrality Results:")
+print("Bootstrap Centrality Results (iter=1000):")
 print(cent_boot.round(4))
 ```
 
-## R Permutation Test
+## Permutation Test: R vs Python
 
 ```{r r-permutation}
-# Split data into two groups
 n <- nrow(group_regulation)
 group1_r <- group_regulation[1:(n %/% 2), ]
 group2_r <- group_regulation[(n %/% 2 + 1):n, ]
-
 model1_r <- tna(group1_r)
 model2_r <- tna(group2_r)
 
 set.seed(42)
-perm_r <- permutation_test(model1_r, model2_r, iter = 100)
+perm_r <- permutation_test(model1_r, model2_r, iter = 1000)
 
-cat("R Permutation Test Results:\n")
-cat("  Number of significant edges:", sum(perm_r$edges$diffs_sig > 0), "\n")
-cat("  P-value range:", range(perm_r$edges$stats$p_value), "\n")
+cat("R Permutation Test (iter=1000):\n")
+cat("  Significant edges:", sum(perm_r$edges$diffs_sig > 0), "\n")
+
+cat("\nR diffs_sig matrix:\n")
+print(round(perm_r$edges$diffs_sig, 4))
 ```
 
-## Python Permutation Test
-
 ```{python py-permutation}
-# Split data into two groups (same split as R)
-n = len(df)
-group1 = df.iloc[:n//2]
-group2 = df.iloc[n//2:]
+import importlib
+importlib.reload(tna)
 
-# Build models
+df_perm = tna.load_group_regulation()
+half = df_perm.shape[0] // 2
+group1 = df_perm.iloc[:half].copy()
+group2 = df_perm.iloc[half:].copy()
+
 model1_py = tna.build_model(group1)
 model2_py = tna.build_model(group2)
 
-# Permutation test (matches R algorithm: combined transition permutation)
-perm_result = tna.permutation_test(model1_py, model2_py, iter=100, seed=42)
+perm_result = tna.permutation_test(model1_py, model2_py, iter=1000, seed=42)
 
-print("Python Permutation Test Results:")
-print(f"  Number of significant edges: {(perm_result.edges['diffs_sig'] > 0).sum()}")
-edge_pvals = [s['p_value'] for s in perm_result.edges['stats'].values()]
-print(f"  P-value range: [{min(edge_pvals):.4f}, {max(edge_pvals):.4f}]")
+print(f"Python Permutation Test (iter=1000):")
+print(f"  Significant edges: {int((perm_result.edges['diffs_sig'] > 0).sum())}")
 
-# Edge-wise results (legacy format)
-edge_tests = tna.permutation_test_edges(
-    group1, group2,
-    iter=100,
-    seed=42
-)
-print(f"\nEdge-wise tests (legacy format):")
-print(f"  Total edges: {len(edge_tests)}")
-sig_count = (edge_tests['p_value'] < 0.05).sum()
-print(f"  Significant (p < 0.05): {sig_count}")
+print("\nPython diffs_sig matrix:")
+print(pd.DataFrame(
+    perm_result.edges['diffs_sig'],
+    index=perm_result.labels, columns=perm_result.labels
+).round(4))
 ```
 
-## Permutation Test Comparison
+```{python compare-permutation}
+r_perm_sig = np.array(r.perm_r["edges"]["diffs_sig"])
+r_perm_diffs = np.array(r.perm_r["edges"]["diffs_true"])
+py_perm_diffs = perm_result.edges['diffs_true']
 
-```{r compare-permutation}
-perm_py <- py$perm_result
+# diffs_true must be identical (deterministic: difference of group weights)
+diffs_diff = np.abs(r_perm_diffs - py_perm_diffs).max()
+print(f"diffs_true match (max diff): {diffs_diff:.2e}")
 
-cat("Permutation Test Algorithm Comparison:\n")
-cat("Note: Exact values differ due to different RNGs,\n")
-cat("but the algorithm is identical (combined transition permutation).\n\n")
+# Compare sig matrices
+r_sig_mask = r_perm_sig > 0
+py_sig_mask = perm_result.edges['diffs_sig'] > 0
+agree = (r_sig_mask == py_sig_mask).sum()
+total = r_sig_mask.size
+print(f"Sig matrix agreement: {agree}/{total} edges ({100*agree/total:.1f}%)")
 
-cat("Structural equivalence checks:\n")
-cat("  Same number of edges:", length(perm_r$edges$stats$p_value) == length(perm_py$edges$stats), "\n")
-cat("  diffs_true shape matches:", all(dim(perm_r$edges$diffs_true) == dim(perm_py$edges$diffs_true)), "\n")
+if agree < total:
+    disagree_idx = np.argwhere(r_sig_mask != py_sig_mask)
+    labels = perm_result.labels
+    print(f"\nDisagreements ({total - agree} edges):")
+    for i, j in disagree_idx:
+        print(f"  {labels[i]} -> {labels[j]}: "
+              f"R={'sig' if r_sig_mask[i,j] else 'ns'}, "
+              f"Py={'sig' if py_sig_mask[i,j] else 'ns'}")
 ```
 
 ---
@@ -673,16 +613,17 @@ plt.show()
 ## Sequence Visualization
 
 ```{python py-sequence-plots, fig.width=12, fig.height=8}
-# State distribution over time
-fig = tna.plot_sequences(df, plot_type='distribution')
+# Reload fresh data (reticulate can corrupt pandas objects)
+df_viz = tna.load_group_regulation()
+fig = tna.plot_sequences(df_viz, plot_type='distribution')
 plt.suptitle('State Distribution Over Time', fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
 plt.show()
 ```
 
 ```{python py-frequency-plot, fig.width=10, fig.height=6}
-# State frequencies
-fig = tna.plot_frequencies(df)
+# State frequencies (requires TNA model, not raw data)
+fig = tna.plot_frequencies(model_py)
 plt.suptitle('State Frequencies', fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
 plt.show()
@@ -715,148 +656,112 @@ plt.show()
 
 # Initial Probabilities Comparison
 
-```{r compare-inits}
-cat("Initial Probabilities Comparison:\n")
-cat(sprintf("%-12s %12s %12s %12s\n", "State", "R", "Python", "Diff"))
-cat(rep("-", 50), "\n", sep="")
+```{python compare-inits}
+r_inits = np.array(r.model_r["inits"])
+py_inits = model_py.inits
+states = list(model_py.labels)
 
-inits_py <- py$model_py$inits
-labels_py <- py$model_py$labels
-names(inits_py) <- labels_py
+print("Initial Probabilities Comparison:")
+print(f"{'State':<12} {'R':>12} {'Python':>12} {'Diff':>12}")
+print("-" * 50)
+for i, state in enumerate(states):
+    diff = abs(r_inits[i] - py_inits[i])
+    print(f"{state:<12} {r_inits[i]:12.6f} {py_inits[i]:12.6f} {diff:12.2e}")
 
-for (state in model_r$labels) {
-  r_val <- model_r$inits[match(state, model_r$labels)]
-  py_val <- inits_py[state]
-  cat(sprintf("%-12s %12.6f %12.6f %12.2e\n", state, r_val, py_val, abs(r_val - py_val)))
-}
-
-max_init_diff <- max(abs(model_r$inits - inits_py[model_r$labels]))
-cat(sprintf("\nMaximum initial probability difference: %.2e\n", max_init_diff))
+max_init_diff = np.abs(r_inits - py_inits).max()
+print(f"\nMaximum initial probability difference: {max_init_diff:.2e}")
 ```
 
 ---
 
 # Numerical Equivalence Summary
 
-```{r final-summary}
-cat("="  , rep("=", 70), "\n", sep="")
-cat("         COMPLETE NUMERICAL EQUIVALENCE SUMMARY\n")
-cat("=" , rep("=", 70), "\n\n", sep="")
+```{python final-summary}
+print("=" * 72)
+print("         COMPLETE NUMERICAL EQUIVALENCE SUMMARY")
+print("=" * 72 + "\n")
 
-# Collect all results
-results <- data.frame(
-  Component = character(),
-  Max_Difference = numeric(),
-  Status = character(),
-  stringsAsFactors = FALSE
-)
+summary_results = []
 
 # TNA weights
-diff_tna <- max(abs(model_r$weights - weights_py_ordered))
-results <- rbind(results, data.frame(
-  Component = "TNA Transition Matrix",
-  Max_Difference = diff_tna,
-  Status = ifelse(diff_tna < 1e-10, "EQUIVALENT", "DIFFERS")
-))
+r_w = np.array(r.model_r["weights"])
+d = np.abs(r_w - model_py.weights).max()
+summary_results.append(("TNA Transition Matrix", d, d < 1e-10))
 
 # FTNA weights
-diff_ftna <- max(abs(ftna_r$weights - ftna_weights_py_ordered))
-results <- rbind(results, data.frame(
-  Component = "FTNA Frequency Matrix",
-  Max_Difference = diff_ftna,
-  Status = ifelse(diff_ftna < 1e-10, "EQUIVALENT", "DIFFERS")
-))
+r_fw = np.array(r.ftna_r["weights"])
+d = np.abs(r_fw - ftna_py.weights).max()
+summary_results.append(("FTNA Frequency Matrix", d, d < 1e-10))
 
 # CTNA weights
-diff_ctna <- max(abs(ctna_r$weights - ctna_weights_py_ordered))
-results <- rbind(results, data.frame(
-  Component = "CTNA Co-occurrence Matrix",
-  Max_Difference = diff_ctna,
-  Status = ifelse(diff_ctna < 1e-10, "EQUIVALENT", "DIFFERS")
-))
+r_cw = np.array(r.ctna_r["weights"])
+d = np.abs(r_cw - ctna_py.weights).max()
+summary_results.append(("CTNA Co-occurrence Matrix", d, d < 1e-10))
 
 # Initial probabilities
-diff_inits <- max(abs(model_r$inits - inits_py[model_r$labels]))
-results <- rbind(results, data.frame(
-  Component = "Initial Probabilities",
-  Max_Difference = diff_inits,
-  Status = ifelse(diff_inits < 1e-10, "EQUIVALENT", "DIFFERS")
-))
+d = np.abs(r_inits - py_inits).max()
+summary_results.append(("Initial Probabilities", d, d < 1e-10))
 
 # Centralities
-for (m in measures) {
-  r_vals <- cent_r[, m]
-  py_vals <- cent_py_ordered[, m]
-  diff <- max(abs(r_vals - py_vals), na.rm = TRUE)
-  results <- rbind(results, data.frame(
-    Component = paste0("Centrality: ", m),
-    Max_Difference = diff,
-    Status = ifelse(diff < 1e-6, "EQUIVALENT", "DIFFERS")
-  ))
-}
+for m in measures:
+    r_vals = r_cent_data[m]
+    py_vals = cent_py[m].values
+    d = np.abs(r_vals - py_vals).max()
+    summary_results.append((f"Centrality: {m}", d, d < 1e-6))
 
-# Print summary table
-cat("Component-wise Results:\n")
-cat(rep("-", 70), "\n", sep="")
-print(results, row.names = FALSE)
+# Bootstrap: weights_orig (deterministic)
+r_boot_orig = np.array(r.boot_r["weights_orig"])
+d = np.abs(r_boot_orig - boot.weights_orig).max()
+summary_results.append(("Bootstrap: weights_orig", d, d < 1e-10))
 
-cat("\n")
-cat(rep("-", 70), "\n", sep="")
+# Bootstrap: sig matrix agreement
+r_bsig = np.array(r.boot_r["weights_sig"]) > 0
+py_bsig = boot.weights_sig > 0
+boot_agree = (r_bsig == py_bsig).mean()
+summary_results.append((f"Bootstrap: sig agreement", 1 - boot_agree, boot_agree >= 0.9))
 
-# Bootstrap algorithm equivalence
-boot_orig_diff <- max(abs(boot_r$weights_orig - py$boot$weights_orig))
-results <- rbind(results, data.frame(
-  Component = "Bootstrap: weights_orig",
-  Max_Difference = boot_orig_diff,
-  Status = ifelse(boot_orig_diff < 1e-10, "EQUIVALENT", "DIFFERS")
-))
+# Permutation: diffs_true (deterministic)
+r_dt = np.array(r.perm_r["edges"]["diffs_true"])
+d = np.abs(r_dt - perm_result.edges['diffs_true']).max()
+summary_results.append(("Permutation: diffs_true", d, d < 1e-10))
 
-results <- rbind(results, data.frame(
-  Component = "Bootstrap: Algorithm structure",
-  Max_Difference = 0,
-  Status = ifelse(
-    all(dim(boot_r$p_values) == dim(py$boot$p_values)) &
-    abs(min(boot_r$p_values) - min(py$boot$p_values)) < 1e-10,
-    "EQUIVALENT", "DIFFERS")
-))
+# Permutation: sig matrix agreement
+r_psig = np.array(r.perm_r["edges"]["diffs_sig"]) > 0
+py_psig = perm_result.edges['diffs_sig'] > 0
+perm_agree = (r_psig == py_psig).mean()
+summary_results.append((f"Permutation: sig agreement", 1 - perm_agree, perm_agree >= 0.9))
 
-# Permutation algorithm equivalence
-results <- rbind(results, data.frame(
-  Component = "Permutation: Algorithm structure",
-  Max_Difference = 0,
-  Status = ifelse(
-    all(dim(perm_r$edges$diffs_true) == dim(py$perm_result$edges$diffs_true)),
-    "EQUIVALENT", "DIFFERS")
-))
+# Print
+print("Component-wise Results:")
+print("-" * 72)
+print(f"{'Component':<35} {'Max Difference':>15} {'Status':>15}")
+print("-" * 72)
+for comp, diff, equiv in summary_results:
+    status = "EQUIVALENT" if equiv else "DIFFERS"
+    print(f"{comp:<35} {diff:15.2e} {status:>15}")
 
-# Overall summary
-all_equiv <- all(results$Status == "EQUIVALENT")
-cat(sprintf("\nOVERALL STATUS: %s\n",
-            ifelse(all_equiv, "ALL COMPONENTS EQUIVALENT", "SOME DIFFERENCES FOUND")))
+n_equiv = sum(1 for _, _, e in summary_results if e)
+n_total = len(summary_results)
+all_equiv = n_equiv == n_total
 
-cat(sprintf("\nEquivalent components: %d / %d\n",
-            sum(results$Status == "EQUIVALENT"),
-            nrow(results)))
-
-cat("\n")
-cat("=" , rep("=", 70), "\n", sep="")
+print("\n" + "-" * 72)
+print(f"\nOVERALL STATUS: {'ALL COMPONENTS EQUIVALENT' if all_equiv else 'SOME DIFFERENCES FOUND'}")
+print(f"\nEquivalent components: {n_equiv} / {n_total}")
+print("\n" + "=" * 72)
 ```
 
 ---
 
 # Tolerance Analysis
 
-```{r tolerance-analysis}
-cat("Tolerance Analysis:\n\n")
+```{python tolerance-analysis}
+print("Tolerance Analysis:\n")
+print("Components meeting each tolerance level:\n")
 
-tolerances <- c(1e-15, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4)
-
-cat("Components meeting each tolerance level:\n\n")
-
-for (tol in tolerances) {
-  n_pass <- sum(results$Max_Difference < tol)
-  cat(sprintf("  < %.0e: %d / %d components\n", tol, n_pass, nrow(results)))
-}
+tolerances = [1e-15, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4]
+for tol in tolerances:
+    n_pass = sum(1 for _, d, _ in summary_results if d < tol)
+    print(f"  < {tol:.0e}: {n_pass} / {len(summary_results)} components")
 ```
 
 ---
