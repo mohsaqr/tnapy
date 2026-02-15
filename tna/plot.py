@@ -120,7 +120,7 @@ def _draw_curved_edge(
     arrow = mpatches.FancyArrowPatch(
         p1, p2,
         connectionstyle=f"arc3,rad={rad}",
-        arrowstyle=f"->,head_length={arrow_size / 15:.2f},head_width={arrow_size / 25:.2f}",
+        arrowstyle=f"->,head_length={arrow_size / 15:.2f},head_width={arrow_size / 22:.2f}",
         color=color,
         alpha=alpha,
         linewidth=width,
@@ -609,11 +609,11 @@ def plot_network(
                     ),
                 )
                 continue
-            # Midpoint
+            # Position label ~65% along edge towards destination
             x1, y1 = pos[u]
             x2, y2 = pos[v]
-            mx = (x1 + x2) / 2
-            my = (y1 + y2) / 2
+            mx = x1 + 0.65 * (x2 - x1)
+            my = y1 + 0.65 * (y2 - y1)
 
             # Perpendicular offset for bidirectional edges
             if (u, v) in bidir:
