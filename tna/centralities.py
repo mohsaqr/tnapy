@@ -379,3 +379,54 @@ def _clustering(weights: np.ndarray) -> np.ndarray:
     result[~np.isfinite(result)] = 0.0
 
     return result
+
+
+def betweenness_network(model: 'TNA') -> 'TNA':
+    """Compute edge betweenness centrality and return as a new TNA model.
+
+    Creates a new TNA model where edge weights represent edge betweenness
+    centrality values, computed using inverse original weights as distances.
+
+    Parameters
+    ----------
+    model : TNA
+        A TNA model object
+
+    Returns
+    -------
+    TNA
+        New TNA model with edge betweenness values as weights
+    """
+    from .model import TNA as TNAClass
+
+    weights = model.weights.copy()
+    n = weights.shape[0]
+
+    # Create directed graph with inverse weights as distance
+    G = nx.DiGraph()
+    G.add_nodes_from(range(n))
+    for i in range(n):
+        for j in range(n):
+            if weights[i, j] > 0:
+                G.add_edge(i, j, weight=weights[i, j])
+
+    # Compute edge betweenness using 1/weight as distance
+    eb = nx.edge_betweenness_centrality(
+        G,
+        weight=lambda u, v, d: 1.0 / d['weight'] if d['weight'] > 0 else float('inf'),
+        normalized=False,
+    )
+
+    # Build betweenness weight matrix
+    bet_weights = np.zeros((n, n))
+    for (i, j), val in eb.items():
+        bet_weights[i, j] = val
+
+    return TNAClass(
+        weights=bet_weights,
+        inits=model.inits.copy(),
+        labels=list(model.labels),
+        data=model.data,
+        type_="betweenness",
+        scaling=list(model.scaling),
+    )

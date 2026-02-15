@@ -29,7 +29,10 @@ Example
 
 from .model import TNA, build_model, tna, ftna, ctna, atna
 from .prepare import TNAData, prepare_data, create_seqdata
-from .centralities import centralities, AVAILABLE_MEASURES
+from .centralities import centralities, betweenness_network, AVAILABLE_MEASURES
+from .prune import prune
+from .cliques import cliques, CliqueResult
+from .communities import communities, CommunityResult
 from .utils import (
     row_normalize,
     minmax_scale,
@@ -47,6 +50,7 @@ from .plot import (
     plot_sequences,
     plot_frequencies,
     plot_histogram,
+    plot_communities,
 )
 from .bootstrap import (
     BootstrapResult,
@@ -79,7 +83,16 @@ __all__ = [
     "create_seqdata",
     # Centralities
     "centralities",
+    "betweenness_network",
     "AVAILABLE_MEASURES",
+    # Pruning
+    "prune",
+    # Cliques
+    "cliques",
+    "CliqueResult",
+    # Communities
+    "communities",
+    "CommunityResult",
     # Utilities
     "row_normalize",
     "minmax_scale",
@@ -101,6 +114,7 @@ __all__ = [
     "plot_sequences",
     "plot_frequencies",
     "plot_histogram",
+    "plot_communities",
     # Statistical inference (bootstrap)
     "BootstrapResult",
     "PermutationResult",

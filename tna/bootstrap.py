@@ -1292,7 +1292,10 @@ def plot_network_ci(
         raise ImportError("Plotting requires matplotlib. Install with: pip install matplotlib")
 
     import networkx as nx
-    from .plot import _get_layout
+    from .plot import (
+        _get_layout, _compute_graph_center, _node_radius_approx,
+        _identify_bidirectional_pairs, _draw_curved_edge, _draw_self_loop,
+    )
     from .colors import color_palette
 
     labels = bootstrap_result.labels
@@ -1316,53 +1319,77 @@ def plot_network_ci(
 
     # Get colors
     colors = color_palette(n)
-    node_colors = colors
 
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=1500, ax=ax)
-    nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold', ax=ax)
+    # Draw nodes with ax.scatter
+    node_list = list(G.nodes())
+    xs = [pos[nd][0] for nd in node_list]
+    ys = [pos[nd][1] for nd in node_list]
+    ax.scatter(
+        xs, ys, s=1500, c=colors, edgecolors='white', linewidths=2, zorder=3,
+    )
+
+    # Force axis limits
+    pad = 0.25
+    ax.set_xlim(min(xs) - pad, max(xs) + pad)
+    ax.set_ylim(min(ys) - pad, max(ys) + pad)
+    fig.canvas.draw_idle()
+
+    # Node labels
+    for nd in node_list:
+        x, y = pos[nd]
+        ax.text(x, y, nd, fontsize=10, fontweight='bold',
+                ha='center', va='center', zorder=4)
+
+    # Shrink in points: scatter s=1500, radius = sqrt(1500)/2
+    shrink_pts = np.sqrt(1500) / 2
+    # Data-coord radius for self-loop anchors
+    node_radii_data = {nd: _node_radius_approx(1500, ax) for nd in node_list}
 
     # Calculate edge properties
-    edges = list(G.edges(data=True))
-    edge_widths = []
-    edge_alphas = []
+    edges_list = [(u, v, d) for u, v, d in G.edges(data=True)]
+    edge_pairs = [(u, v) for u, v, _ in edges_list]
+    bidir = _identify_bidirectional_pairs(edge_pairs)
 
-    for u, v, data in edges:
+    for u, v, data in edges_list:
         i = labels.index(u)
         j = labels.index(v)
         weight = data['weight']
-
-        edge_widths.append(0.5 + 4.5 * weight / weights.max())
+        w = 0.5 + 4.5 * weight / weights.max()
 
         if edge_alpha == "significance":
             is_sig = bootstrap_result.p_values[i, j] < bootstrap_result.level
-            edge_alphas.append(0.9 if is_sig else 0.2)
+            a = 0.9 if is_sig else 0.2
         elif edge_alpha == "ci_width":
             ci_w = bootstrap_result.ci_upper[i, j] - bootstrap_result.ci_lower[i, j]
             max_w = np.max(bootstrap_result.ci_upper - bootstrap_result.ci_lower)
-            if max_w > 0:
-                edge_alphas.append(0.9 - 0.7 * ci_w / max_w)
-            else:
-                edge_alphas.append(0.9)
+            a = (0.9 - 0.7 * ci_w / max_w) if max_w > 0 else 0.9
         else:
-            edge_alphas.append(0.7)
+            a = 0.7
 
-    for idx, (u, v, data) in enumerate(edges):
-        if u != v:
-            nx.draw_networkx_edges(
-                G, pos,
-                edgelist=[(u, v)],
-                width=edge_widths[idx],
-                edge_color='gray',
-                alpha=edge_alphas[idx],
-                arrows=True,
-                arrowsize=15,
-                connectionstyle="arc3,rad=0.1",
-                ax=ax
+        if u == v:
+            graph_center = _compute_graph_center(pos)
+            _draw_self_loop(
+                ax, pos[u], graph_center,
+                node_radius=node_radii_data[u],
+                width=w, alpha=a, color='#444444',
+                zorder=1,
+            )
+        else:
+            if (u, v) in bidir:
+                rad = 0.2 if u < v else -0.2
+            else:
+                rad = 0.0
+
+            _draw_curved_edge(
+                ax, pos[u], pos[v],
+                rad=rad, width=w, alpha=a, color='#444444',
+                shrink_a=shrink_pts,
+                shrink_b=shrink_pts,
+                zorder=1,
             )
 
-    sig_patch = mpatches.Patch(color='gray', alpha=0.9, label='Significant')
-    nonsig_patch = mpatches.Patch(color='gray', alpha=0.2, label='Non-significant')
+    sig_patch = mpatches.Patch(color='#444444', alpha=0.9, label='Significant')
+    nonsig_patch = mpatches.Patch(color='#444444', alpha=0.2, label='Non-significant')
     ax.legend(handles=[sig_patch, nonsig_patch], loc='upper left')
 
     ax.set_title(f'TNA Network (p < {bootstrap_result.level})', fontweight='bold')
