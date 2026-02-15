@@ -50,23 +50,28 @@ def _compute_graph_center(
 def _node_radius_approx(node_size: float, ax) -> float:
     """Convert scatter *point* size to approximate data-coordinate radius.
 
-    matplotlib scatter sizes are in *points²*.  We convert to display
-    coordinates, then to data coordinates so that arrows can stop at the
-    node perimeter.
+    matplotlib scatter sizes are in *points²*.  We convert to data
+    coordinates using the figure size and axis limits directly, avoiding
+    ax.get_window_extent() which is unreliable on non-interactive backends
+    (e.g. Google Colab's agg backend).
     """
     fig = ax.figure
-    # points -> inches -> display pixels -> data coords
     dpi = fig.dpi
     radius_pts = np.sqrt(node_size) / 2          # half-side in points
     radius_inches = radius_pts / 72               # points -> inches
     radius_disp = radius_inches * dpi             # inches -> display px
 
-    # data range per display pixel (average of x and y)
+    # Compute data-per-pixel from figure size (inches) and axis limits
+    # This avoids get_window_extent() which fails on headless backends
+    fig_w, fig_h = fig.get_size_inches()
+    ax_pos = ax.get_position()  # fractional position within figure
+    ax_w_px = ax_pos.width * fig_w * dpi
+    ax_h_px = ax_pos.height * fig_h * dpi
+
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
-    bbox = ax.get_window_extent()
-    sx = (xlim[1] - xlim[0]) / bbox.width if bbox.width else 1
-    sy = (ylim[1] - ylim[0]) / bbox.height if bbox.height else 1
+    sx = (xlim[1] - xlim[0]) / ax_w_px if ax_w_px else 1
+    sy = (ylim[1] - ylim[0]) / ax_h_px if ax_h_px else 1
     scale = (sx + sy) / 2
     return radius_disp * scale
 
@@ -451,7 +456,7 @@ def plot_network(
     pad = 0.25
     ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
-    fig.canvas.draw_idle()  # flush so get_window_extent is valid
+    fig.canvas.draw()  # flush layout so axis positions are valid
 
     # Compute per-edge alphas proportional to weight
     edge_alphas = _compute_edge_alphas(edge_weights)
@@ -1055,7 +1060,7 @@ def plot_sequences(
         n_timesteps = len(df_plot.columns)
 
         if figsize is None:
-            figsize = (max(8, n_timesteps * 0.3), max(6, n_sequences * 0.1))
+            figsize = (max(8, n_timesteps * 0.3), max(6, min(n_sequences * 0.03, 12)))
 
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -1115,8 +1120,9 @@ def plot_sequences(
         bottom = np.zeros(n_timesteps)
         for state in unique_states:
             values = freq_df[state].values
-            ax.bar(freq_df.index, values, bottom=bottom,
-                  color=color_map[state], label=state, **kwargs)
+            ax.bar(freq_df.index, values, width=1.0, bottom=bottom,
+                  color=color_map[state], label=state, edgecolor='white',
+                  linewidth=0.3, **kwargs)
             bottom += values
 
         ax.set_xlabel('Time Step', fontweight='bold')

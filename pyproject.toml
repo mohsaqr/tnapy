@@ -63,6 +63,9 @@ Issues = "https://github.com/mohsaqr/tnapy/issues"
 [tool.setuptools.packages.find]
 include = ["tna*"]
 
+[tool.setuptools.package-data]
+tna = ["data/*.csv"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

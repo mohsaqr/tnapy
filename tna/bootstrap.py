@@ -1332,7 +1332,7 @@ def plot_network_ci(
     pad = 0.25
     ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
-    fig.canvas.draw_idle()
+    fig.canvas.draw()
 
     # Node labels
     for nd in node_list:
