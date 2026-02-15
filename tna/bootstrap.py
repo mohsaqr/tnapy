@@ -401,6 +401,18 @@ def bootstrap_tna(
     >>> boot = tna.bootstrap_tna(model, iter=500, seed=42)
     >>> print(boot.summary())
     """
+    # Handle GroupTNA input
+    from .group import _is_group_tna
+    if _is_group_tna(x):
+        return {
+            name: bootstrap_tna(
+                m, iter=iter, level=level, method=method,
+                threshold=threshold, consistency_range=consistency_range,
+                seed=seed, type_=type_, scaling=scaling,
+            )
+            for name, m in x.items()
+        }
+
     # Handle input: TNA model or raw data
     if isinstance(x, TNA):
         model = x

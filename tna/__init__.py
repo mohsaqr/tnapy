@@ -33,6 +33,7 @@ from .centralities import centralities, betweenness_network, AVAILABLE_MEASURES
 from .prune import prune
 from .cliques import cliques, CliqueResult
 from .communities import communities, CommunityResult
+from .group import GroupTNA, group_tna, group_ftna, group_ctna, group_atna
 from .utils import (
     row_normalize,
     minmax_scale,
@@ -93,6 +94,12 @@ __all__ = [
     # Communities
     "communities",
     "CommunityResult",
+    # Group models
+    "GroupTNA",
+    "group_tna",
+    "group_ftna",
+    "group_ctna",
+    "group_atna",
     # Utilities
     "row_normalize",
     "minmax_scale",

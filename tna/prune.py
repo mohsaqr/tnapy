@@ -18,17 +18,25 @@ def prune(model: 'TNA', threshold: float = 0.1) -> 'TNA':
 
     Parameters
     ----------
-    model : TNA
-        The TNA model to prune
+    model : TNA or GroupTNA
+        The TNA model to prune, or GroupTNA for per-group pruning.
     threshold : float
         Minimum edge weight to keep (default: 0.1).
         Edges with weight < threshold are set to 0.
 
     Returns
     -------
-    TNA
-        New TNA model with pruned weights
+    TNA or GroupTNA
+        New TNA model with pruned weights.
+        For GroupTNA input, returns a GroupTNA.
     """
+    # Handle GroupTNA input
+    from .group import _is_group_tna, GroupTNA
+    if _is_group_tna(model):
+        return GroupTNA(
+            models={name: prune(m, threshold=threshold) for name, m in model.items()}
+        )
+
     from .model import TNA as TNAClass
 
     weights = model.weights.copy()

@@ -40,8 +40,8 @@ def centralities(
 
     Parameters
     ----------
-    model : TNA
-        A TNA model object
+    model : TNA or GroupTNA
+        A TNA model object, or a GroupTNA for per-group centralities.
     loops : bool
         If True, include self-loops in calculations
     normalize : bool
@@ -54,8 +54,20 @@ def centralities(
     Returns
     -------
     pd.DataFrame
-        DataFrame with states as rows and centrality measures as columns
+        DataFrame with states as rows and centrality measures as columns.
+        For GroupTNA input, includes an extra 'group' column.
     """
+    # Handle GroupTNA input
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        dfs = []
+        for name, m in model.items():
+            df = centralities(m, loops=loops, normalize=normalize, measures=measures)
+            df = df.copy()
+            df.insert(0, "group", name)
+            dfs.append(df)
+        return pd.concat(dfs)
+
     if measures is None:
         measures = AVAILABLE_MEASURES.copy()
 
@@ -389,14 +401,22 @@ def betweenness_network(model: 'TNA') -> 'TNA':
 
     Parameters
     ----------
-    model : TNA
-        A TNA model object
+    model : TNA or GroupTNA
+        A TNA model object, or GroupTNA for per-group betweenness.
 
     Returns
     -------
-    TNA
-        New TNA model with edge betweenness values as weights
+    TNA or GroupTNA
+        New TNA model with edge betweenness values as weights.
+        For GroupTNA input, returns a GroupTNA.
     """
+    # Handle GroupTNA input
+    from .group import _is_group_tna, GroupTNA
+    if _is_group_tna(model):
+        return GroupTNA(
+            models={name: betweenness_network(m) for name, m in model.items()}
+        )
+
     from .model import TNA as TNAClass
 
     weights = model.weights.copy()

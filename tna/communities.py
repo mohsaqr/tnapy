@@ -63,7 +63,7 @@ class CommunityResult:
 def communities(
     model: 'TNA',
     methods: str | list[str] | None = None,
-) -> CommunityResult:
+) -> CommunityResult | dict:
     """Detect communities in a TNA model.
 
     Applies one or more community detection algorithms to the
@@ -71,8 +71,8 @@ def communities(
 
     Parameters
     ----------
-    model : TNA
-        The TNA model to analyze
+    model : TNA or GroupTNA
+        The TNA model to analyze, or GroupTNA for per-group detection.
     methods : str, list of str, or None
         Community detection method(s) to use. If None, uses 'leading_eigen'.
         Available methods:
@@ -85,9 +85,15 @@ def communities(
 
     Returns
     -------
-    CommunityResult
-        Object containing community assignments and counts
+    CommunityResult or dict
+        Object containing community assignments and counts.
+        For GroupTNA input, returns ``dict[str, CommunityResult]``.
     """
+    # Handle GroupTNA input
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        return {name: communities(m, methods=methods) for name, m in model.items()}
+
     if methods is None:
         methods = ['leading_eigen']
     elif isinstance(methods, str):

@@ -366,6 +366,31 @@ def plot_network(
     >>> # With centrality-based node sizing
     >>> tna.plot_network(model, node_size='OutStrength', layout='spring')
     """
+    # Handle GroupTNA input → side-by-side subplots
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        n_groups = len(model)
+        fig_w = figsize[0] * n_groups
+        fig_h = figsize[1]
+        fig, axes = plt.subplots(1, n_groups, figsize=(fig_w, fig_h))
+        if n_groups == 1:
+            axes = [axes]
+        for ax_i, (name, m) in zip(axes, model.items()):
+            group_title = name if title is None else f"{title} — {name}"
+            plot_network(
+                m, labels=labels, colors=colors, layout=layout,
+                node_size=node_size, node_size_range=node_size_range,
+                edge_labels=edge_labels, edge_threshold=edge_threshold,
+                minimum=minimum, cut=cut, edge_width_range=edge_width_range,
+                show_self_loops=show_self_loops, self_loop_scale=self_loop_scale,
+                curved_edges=curved_edges, arrow_size=arrow_size,
+                font_size=font_size, edge_font_size=edge_font_size,
+                figsize=figsize, title=group_title, ax=ax_i, seed=seed,
+                **kwargs,
+            )
+        plt.tight_layout()
+        return fig
+
     # Handle minimum as alias for edge_threshold
     if minimum is not None:
         edge_threshold = minimum
@@ -1188,6 +1213,23 @@ def plot_frequencies(
     """
     _check_matplotlib()
 
+    # Handle GroupTNA input → side-by-side frequency plots
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        n_groups = len(model)
+        default_w, default_h = (8, 6)
+        fig, axes = plt.subplots(
+            1, n_groups,
+            figsize=(default_w * n_groups, default_h) if figsize is None else (figsize[0] * n_groups, figsize[1]),
+        )
+        if n_groups == 1:
+            axes = [axes]
+        for ax_i, (name, m) in zip(axes, model.items()):
+            plot_frequencies(m, colors=colors, horizontal=horizontal,
+                           sort_values=sort_values, title=name, ax=ax_i, **kwargs)
+        plt.tight_layout()
+        return fig
+
     if ax is None:
         if figsize is None:
             figsize = (8, 6)
@@ -1274,6 +1316,19 @@ def plot_histogram(
     >>> plt.show()
     """
     _check_matplotlib()
+
+    # Handle GroupTNA input → side-by-side histograms
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        n_groups = len(model)
+        fig, axes = plt.subplots(1, n_groups, figsize=(figsize[0] * n_groups, figsize[1]))
+        if n_groups == 1:
+            axes = [axes]
+        for ax_i, (name, m) in zip(axes, model.items()):
+            plot_histogram(m, bins=bins, color=color, include_zeros=include_zeros,
+                          figsize=figsize, title=name, ax=ax_i, **kwargs)
+        plt.tight_layout()
+        return fig
 
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)

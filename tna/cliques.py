@@ -65,7 +65,7 @@ def cliques(
     size: int = 2,
     threshold: float = 0,
     sum_weights: bool = False,
-) -> CliqueResult:
+) -> CliqueResult | dict:
     """Find directed cliques in a TNA model.
 
     A directed clique of size k is a set of k nodes where every pair
@@ -77,8 +77,8 @@ def cliques(
 
     Parameters
     ----------
-    model : TNA
-        The TNA model to analyze
+    model : TNA or GroupTNA
+        The TNA model to analyze, or GroupTNA for per-group detection.
     size : int
         Clique size to search for (default: 2 for dyads)
     threshold : float
@@ -89,9 +89,18 @@ def cliques(
 
     Returns
     -------
-    CliqueResult
-        Object containing detected cliques with their weights and labels
+    CliqueResult or dict
+        Object containing detected cliques with their weights and labels.
+        For GroupTNA input, returns ``dict[str, CliqueResult]``.
     """
+    # Handle GroupTNA input
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        return {
+            name: cliques(m, size=size, threshold=threshold, sum_weights=sum_weights)
+            for name, m in model.items()
+        }
+
     import networkx as nx
 
     weights = model.weights.copy()
