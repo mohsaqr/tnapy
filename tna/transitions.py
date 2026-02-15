@@ -369,6 +369,139 @@ def _transitions_attention(
     return weights, inits
 
 
+def _is_na(val) -> bool:
+    """Check if a value is NA/None/NaN."""
+    if val is None:
+        return True
+    if isinstance(val, float) and np.isnan(val):
+        return True
+    try:
+        if pd.isna(val):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+def compute_transitions_3d(
+    data: np.ndarray,
+    states: list[str],
+    type_: str = "relative",
+    params: dict | None = None
+) -> np.ndarray:
+    """Compute per-sequence transition counts as a 3D array.
+
+    Matches R TNA's compute_transitions function exactly.
+    Returns array of shape (n_sequences, n_states, n_states) where
+    trans[k, i, j] = number of i->j transitions in sequence k.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Sequence data (rows are sequences, columns are time steps)
+    states : list of str
+        List of state labels
+    type_ : str
+        Transition type ('relative', 'frequency', 'co-occurrence', 'reverse')
+    params : dict, optional
+        Additional parameters
+
+    Returns
+    -------
+    np.ndarray
+        3D array of shape (n_sequences, n_states, n_states)
+    """
+    params = params or {}
+    n_sequences = data.shape[0]
+    n_steps = data.shape[1]
+    n_states = len(states)
+    state_to_idx = {s: i for i, s in enumerate(states)}
+
+    trans = np.zeros((n_sequences, n_states, n_states))
+
+    if type_ in ("relative", "frequency"):
+        for col in range(n_steps - 1):
+            for row in range(n_sequences):
+                from_val = data[row, col]
+                to_val = data[row, col + 1]
+                if _is_na(from_val) or _is_na(to_val):
+                    continue
+                from_str = str(from_val)
+                to_str = str(to_val)
+                if from_str in state_to_idx and to_str in state_to_idx:
+                    trans[row, state_to_idx[from_str], state_to_idx[to_str]] += 1
+
+    elif type_ == "reverse":
+        for col in range(n_steps - 1):
+            for row in range(n_sequences):
+                from_val = data[row, col + 1]
+                to_val = data[row, col]
+                if _is_na(from_val) or _is_na(to_val):
+                    continue
+                from_str = str(from_val)
+                to_str = str(to_val)
+                if from_str in state_to_idx and to_str in state_to_idx:
+                    trans[row, state_to_idx[from_str], state_to_idx[to_str]] += 1
+
+    elif type_ == "co-occurrence":
+        for i in range(n_steps - 1):
+            for j in range(i + 1, n_steps):
+                for row in range(n_sequences):
+                    from_val = data[row, i]
+                    to_val = data[row, j]
+                    if _is_na(from_val) or _is_na(to_val):
+                        continue
+                    from_str = str(from_val)
+                    to_str = str(to_val)
+                    if from_str in state_to_idx and to_str in state_to_idx:
+                        fi = state_to_idx[from_str]
+                        ti = state_to_idx[to_str]
+                        trans[row, fi, ti] += 1
+                        trans[row, ti, fi] += 1
+
+    return trans
+
+
+def compute_weights_from_3d(
+    transitions: np.ndarray,
+    type_: str = "relative",
+    scaling: str | list[str] | None = None,
+) -> np.ndarray:
+    """Compute weight matrix from 3D per-sequence transitions.
+
+    Matches R TNA's compute_weights + scale_weights:
+        weights <- apply(transitions, c(2, 3), sum)
+        scale_weights(weights, type, scaling, a)
+
+    Parameters
+    ----------
+    transitions : np.ndarray
+        3D array (n_sequences, n_states, n_states)
+    type_ : str
+        Model type ('relative' for row-normalization)
+    scaling : str or list, optional
+        Additional scaling to apply
+
+    Returns
+    -------
+    np.ndarray
+        2D weight matrix (n_states, n_states)
+    """
+    # apply(transitions, c(2, 3), sum) - sum over sequences
+    weights = transitions.sum(axis=0)
+
+    # scale_weights: row-normalize for "relative" type
+    if type_ == "relative":
+        weights = row_normalize(weights)
+
+    # Apply additional scaling if requested
+    if scaling:
+        from .utils import apply_scaling as _apply_scaling
+        weights, _ = _apply_scaling(weights, scaling)
+
+    return weights
+
+
 def compute_weights_from_matrix(
     mat: np.ndarray,
     type_: str = "relative"

@@ -1,7 +1,10 @@
 """Statistical inference for TNA: bootstrap and permutation tests.
 
-Provides bootstrap resampling and permutation testing functionality for
-statistical significance analysis of TNA models and centrality measures.
+Provides bootstrap resampling and permutation testing functionality
+matching the R TNA package algorithms exactly.
+
+R TNA bootstrap uses per-sequence transition resampling with a stability
+method. R TNA permutation test uses edge-wise comparisons with effect sizes.
 """
 
 from __future__ import annotations
@@ -17,8 +20,9 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 from .model import TNA, build_model
-from .prepare import TNAData
+from .prepare import TNAData, create_seqdata
 from .centralities import centralities as compute_centralities, AVAILABLE_MEASURES
+from .transitions import compute_transitions_3d, compute_weights_from_3d
 
 
 # -----------------------------------------------------------------------------
@@ -30,83 +34,126 @@ from .centralities import centralities as compute_centralities, AVAILABLE_MEASUR
 class BootstrapResult:
     """Result of bootstrap analysis for a TNA model.
 
+    Matches R TNA's tna_bootstrap class structure exactly.
+
     Attributes
     ----------
-    estimate : TNA
-        Point estimate (original model)
-    replicates : list[TNA]
-        All bootstrap models
-    weights_ci : tuple[np.ndarray, np.ndarray]
-        (lower, upper) confidence intervals for weights
-    inits_ci : tuple[np.ndarray, np.ndarray]
-        (lower, upper) confidence intervals for initial probabilities
-    n_boot : int
-        Number of bootstrap replicates
-    ci_level : float
-        Confidence interval level (e.g., 0.95)
+    weights_orig : np.ndarray
+        Original weight matrix
+    weights_sig : np.ndarray
+        Significant weights: (p < level) * weights
+    weights_mean : np.ndarray
+        Mean of bootstrap weight matrices
+    weights_sd : np.ndarray
+        SD of bootstrap weight matrices
+    p_values : np.ndarray
+        P-value matrix
+    cr_lower : np.ndarray
+        Consistency range lower bound (weights * consistency_range[0])
+    cr_upper : np.ndarray
+        Consistency range upper bound (weights * consistency_range[1])
+    ci_lower : np.ndarray
+        CI lower bound (quantile at level/2)
+    ci_upper : np.ndarray
+        CI upper bound (quantile at 1 - level/2)
+    boot_summary : pd.DataFrame
+        Summary DataFrame of non-zero edges with stats
+    model : TNA
+        TNA model with pruned weights (only significant edges)
+    labels : list[str]
+        State labels
+    method : str
+        Bootstrap method ('stability' or 'threshold')
+    iter : int
+        Number of bootstrap iterations
+    level : float
+        Significance level
     """
 
-    estimate: TNA
-    replicates: list[TNA]
-    weights_ci: tuple[np.ndarray, np.ndarray]
-    inits_ci: tuple[np.ndarray, np.ndarray]
-    n_boot: int
-    ci_level: float
+    weights_orig: np.ndarray
+    weights_sig: np.ndarray
+    weights_mean: np.ndarray
+    weights_sd: np.ndarray
+    p_values: np.ndarray
+    cr_lower: np.ndarray
+    cr_upper: np.ndarray
+    ci_lower: np.ndarray
+    ci_upper: np.ndarray
+    boot_summary: pd.DataFrame
+    model: TNA
+    labels: list[str]
+    method: str = "stability"
+    iter: int = 1000
+    level: float = 0.05
+
+    # --- Backward compatibility properties ---
+
+    @property
+    def estimate(self) -> TNA:
+        """Original model (backward compatibility)."""
+        return TNA(
+            weights=self.weights_orig,
+            inits=self.model.inits,
+            labels=list(self.labels),
+            data=self.model.data,
+            type_=self.model.type_,
+            scaling=self.model.scaling,
+        )
+
+    @property
+    def replicates(self) -> list:
+        """Not stored in R-compatible mode."""
+        return []
+
+    @property
+    def weights_ci(self) -> tuple[np.ndarray, np.ndarray]:
+        """CI bounds as tuple (backward compatibility)."""
+        return (self.ci_lower, self.ci_upper)
+
+    @property
+    def inits_ci(self) -> tuple[np.ndarray, np.ndarray]:
+        """Not available in R-compatible mode."""
+        n = len(self.labels)
+        return (np.zeros(n), np.ones(n))
+
+    @property
+    def n_boot(self) -> int:
+        """Number of bootstrap iterations (backward compatibility)."""
+        return self.iter
+
+    @property
+    def ci_level(self) -> float:
+        """Confidence interval level (backward compatibility)."""
+        return 1 - self.level
 
     def summary(self) -> pd.DataFrame:
-        """Generate summary statistics for bootstrap results.
+        """Return the bootstrap summary DataFrame.
 
         Returns
         -------
         pd.DataFrame
-            Summary with edges, estimates, CIs, and standard errors
+            Summary with edges, weights, p-values, CIs, and significance
         """
-        labels = self.estimate.labels
-        n = len(labels)
-
-        rows = []
-        for i in range(n):
-            for j in range(n):
-                rows.append({
-                    'from': labels[i],
-                    'to': labels[j],
-                    'estimate': self.estimate.weights[i, j],
-                    'ci_lower': self.weights_ci[0][i, j],
-                    'ci_upper': self.weights_ci[1][i, j],
-                    'se': np.std([r.weights[i, j] for r in self.replicates]),
-                })
-
-        return pd.DataFrame(rows)
+        return self.boot_summary
 
     def significant_edges(self, threshold: float = 0) -> list[tuple[str, str, float]]:
-        """Find edges significantly different from threshold.
-
-        Parameters
-        ----------
-        threshold : float
-            Value to test against (default: 0)
+        """Find edges with significant weights (p < level).
 
         Returns
         -------
         list of tuples
-            List of (from_state, to_state, estimate) for significant edges
+            List of (from_state, to_state, weight) for significant edges
         """
-        labels = self.estimate.labels
-        n = len(labels)
         significant = []
-
+        n = len(self.labels)
         for i in range(n):
             for j in range(n):
-                lower = self.weights_ci[0][i, j]
-                upper = self.weights_ci[1][i, j]
-                # Edge is significant if CI doesn't contain threshold
-                if lower > threshold or upper < threshold:
+                if self.weights_sig[i, j] != 0:
                     significant.append((
-                        labels[i],
-                        labels[j],
-                        self.estimate.weights[i, j]
+                        self.labels[i],
+                        self.labels[j],
+                        self.weights_orig[i, j]
                     ))
-
         return significant
 
 
@@ -114,57 +161,61 @@ class BootstrapResult:
 class PermutationResult:
     """Result of permutation test for comparing TNA models.
 
+    Matches R TNA's tna_permutation class structure exactly.
+
     Attributes
     ----------
-    observed : float | np.ndarray
-        Observed test statistic
-    null_distribution : np.ndarray
-        Permutation distribution
-    p_value : float | np.ndarray
-        P-value(s)
-    n_perm : int
-        Number of permutations
-    alternative : str
-        Alternative hypothesis ('two-sided', 'greater', 'less')
+    edges : dict
+        Edge-wise results with keys:
+        - 'stats': DataFrame with edge_name, diff_true, effect_size, p_value
+        - 'diffs_true': np.ndarray of true differences
+        - 'diffs_sig': np.ndarray of significant differences
+    centralities : dict or None
+        Centrality-wise results (if measures were specified) with keys:
+        - 'stats': DataFrame with state, centrality, diff_true, effect_size, p_value
+        - 'diffs_true': pd.DataFrame
+        - 'diffs_sig': pd.DataFrame
+    labels : list[str]
+        State labels
     """
 
-    observed: float | np.ndarray
-    null_distribution: np.ndarray
-    p_value: float | np.ndarray
-    n_perm: int
-    alternative: str
+    edges: dict
+    centralities: dict | None = None
+    labels: list[str] = field(default_factory=list)
+
+    # --- Backward compatibility properties ---
+
+    @property
+    def observed(self) -> float:
+        """Frobenius norm of edge differences (backward compatibility)."""
+        return float(np.linalg.norm(self.edges['diffs_true'], 'fro'))
+
+    @property
+    def null_distribution(self) -> np.ndarray:
+        """Not stored in R-compatible mode."""
+        return np.array([])
+
+    @property
+    def p_value(self) -> float:
+        """Minimum edge p-value (backward compatibility)."""
+        return float(self.edges['stats']['p_value'].min())
+
+    @property
+    def n_perm(self) -> int:
+        """Number of edges tested (backward compatibility)."""
+        return len(self.edges['stats'])
+
+    @property
+    def alternative(self) -> str:
+        """Alternative hypothesis (backward compatibility)."""
+        return 'two-sided'
 
     def is_significant(self, alpha: float = 0.05) -> bool | np.ndarray:
-        """Check if result is significant at given alpha level.
-
-        Parameters
-        ----------
-        alpha : float
-            Significance level (default: 0.05)
-
-        Returns
-        -------
-        bool or np.ndarray
-            True if significant
-        """
-        if isinstance(self.p_value, np.ndarray):
-            return self.p_value < alpha
-        return self.p_value < alpha
+        """Check if any edge is significant at given alpha level."""
+        return bool(np.any(self.edges['stats']['p_value'].values < alpha))
 
     def plot(self, ax: Axes | None = None, **kwargs) -> Axes:
-        """Plot the null distribution with observed statistic.
-
-        Parameters
-        ----------
-        ax : matplotlib Axes, optional
-            Axes to plot on
-        **kwargs
-            Additional arguments passed to hist()
-
-        Returns
-        -------
-        matplotlib Axes
-        """
+        """Plot the permutation results."""
         return plot_permutation(self, ax=ax, **kwargs)
 
 
@@ -296,123 +347,236 @@ def bca_ci(
 
 
 def bootstrap_tna(
-    data: pd.DataFrame | TNAData,
-    n_boot: int = 1000,
-    type_: str = "relative",
-    ci: float = 0.95,
+    x: TNA | pd.DataFrame | TNAData,
+    iter: int = 1000,
+    level: float = 0.05,
+    method: str = "stability",
+    threshold: float | None = None,
+    consistency_range: tuple[float, float] = (0.75, 1.25),
     seed: int | None = None,
-    parallel: bool = False
+    type_: str = "relative",
+    scaling: str | list[str] | None = None,
 ) -> BootstrapResult:
-    """Bootstrap resampling of sequence data to estimate confidence intervals.
+    """Bootstrap resampling for TNA model stability testing.
 
-    Resamples sequences (rows) with replacement and rebuilds TNA model each time
-    to estimate sampling variability of model parameters.
+    Matches R TNA's bootstrap.tna function exactly. Uses per-sequence
+    transition resampling (not raw sequence resampling) with a stability
+    method that tests whether bootstrap weights stay within a consistency
+    range of the original weights.
+
+    R equivalent: bootstrap(model, iter, level, method, threshold, consistency_range)
 
     Parameters
     ----------
-    data : pd.DataFrame or TNAData
-        Sequence data in wide format (rows = sequences, cols = time steps)
-    n_boot : int
-        Number of bootstrap replicates (default: 1000)
-    type_ : str
-        Model type for build_model (default: 'relative')
-    ci : float
-        Confidence interval level (default: 0.95)
+    x : TNA, pd.DataFrame, or TNAData
+        A TNA model object (preferred, matches R), or sequence data
+        from which a model will be built
+    iter : int
+        Number of bootstrap iterations (default: 1000)
+    level : float
+        Significance level (default: 0.05). CI is at level/2 and 1-level/2.
+    method : str
+        Bootstrap method: 'stability' or 'threshold'
+    threshold : float, optional
+        For threshold method. Default: 10th percentile of weights.
+    consistency_range : tuple
+        For stability method: (lower, upper) multipliers (default: (0.75, 1.25))
     seed : int, optional
         Random seed for reproducibility
-    parallel : bool
-        Whether to use parallel processing (not yet implemented)
+    type_ : str
+        Model type when building from data (default: 'relative')
+    scaling : str or list, optional
+        Scaling when building from data
 
     Returns
     -------
     BootstrapResult
-        Object containing bootstrap estimates and confidence intervals
+        Object matching R's tna_bootstrap structure
 
     Examples
     --------
     >>> import tna
     >>> df = tna.load_group_regulation()
-    >>> boot = tna.bootstrap_tna(df, n_boot=500)
+    >>> model = tna.tna(df)
+    >>> boot = tna.bootstrap_tna(model, iter=500, seed=42)
     >>> print(boot.summary())
-    >>> sig_edges = boot.significant_edges(threshold=0.05)
     """
-    # Handle TNAData input
-    if isinstance(data, TNAData):
-        df = data.sequence_data
+    # Handle input: TNA model or raw data
+    if isinstance(x, TNA):
+        model = x
+        if model.data is None:
+            raise ValueError("TNA model must have sequence data for bootstrap")
+        seq_data = model.data
+        labels = model.labels
+        model_type = model.type_
+        model_scaling = model.scaling if model.scaling else None
     else:
-        df = data
+        # Build model from data
+        if isinstance(x, TNAData):
+            df = x.sequence_data
+        else:
+            df = x
+        model = build_model(df, type_=type_, scaling=scaling)
+        seq_data = model.data
+        labels = model.labels
+        model_type = type_
+        model_scaling = scaling
 
-    # Convert to numpy for efficient resampling
-    arr = df.values
-    n_sequences = len(arr)
+    if seq_data is None:
+        raise ValueError("Cannot bootstrap: no sequence data available")
+
+    n = seq_data.shape[0]  # number of sequences
+    a = len(labels)         # number of states
 
     # Set random seed
     rng = np.random.default_rng(seed)
 
-    # Build original model (point estimate)
-    estimate = build_model(df, type_=type_)
-    labels = estimate.labels
-    n_states = len(labels)
+    # Compute per-sequence 3D transitions (R: compute_transitions)
+    trans = compute_transitions_3d(seq_data, labels, type_=model_type)
 
-    # Bootstrap resampling
-    replicates = []
-    weights_samples = np.zeros((n_boot, n_states, n_states))
-    inits_samples = np.zeros((n_boot, n_states))
+    # Compute original weights (R: compute_weights)
+    weights = compute_weights_from_3d(trans, type_=model_type, scaling=model_scaling)
 
-    for b in range(n_boot):
-        # Resample sequences with replacement
-        indices = rng.choice(n_sequences, size=n_sequences, replace=True)
-        boot_data = pd.DataFrame(arr[indices], columns=df.columns)
+    # Default threshold (R: quantile(x$weights, probs = 0.1))
+    if threshold is None:
+        threshold = float(np.quantile(weights, 0.1))
 
-        # Build model from bootstrap sample
-        boot_model = build_model(boot_data, type_=type_, labels=labels)
-        replicates.append(boot_model)
-        weights_samples[b] = boot_model.weights
-        inits_samples[b] = boot_model.inits
+    # Bootstrap loop
+    weights_boot = np.zeros((iter, a, a))
+    p_values = np.zeros((a, a))
+    idx = np.arange(n)
 
-    # Compute confidence intervals
-    alpha = 1 - ci
-    weights_lower = np.percentile(weights_samples, 100 * alpha / 2, axis=0)
-    weights_upper = np.percentile(weights_samples, 100 * (1 - alpha / 2), axis=0)
-    inits_lower = np.percentile(inits_samples, 100 * alpha / 2, axis=0)
-    inits_upper = np.percentile(inits_samples, 100 * (1 - alpha / 2), axis=0)
+    if method == "stability":
+        for i in range(iter):
+            # Resample per-sequence transitions (R: trans[sample(idx, n, replace=TRUE), , ])
+            boot_idx = rng.choice(idx, size=n, replace=True)
+            trans_boot = trans[boot_idx]
+            weights_boot[i] = compute_weights_from_3d(
+                trans_boot, type_=model_type, scaling=model_scaling
+            )
+            # Count exceedances outside consistency range
+            # R: p_values + 1L * (wb <= w * cr[1]) + 1L * (wb >= w * cr[2])
+            p_values += (
+                (weights_boot[i] <= weights * consistency_range[0]).astype(int) +
+                (weights_boot[i] >= weights * consistency_range[1]).astype(int)
+            )
+    elif method == "threshold":
+        for i in range(iter):
+            boot_idx = rng.choice(idx, size=n, replace=True)
+            trans_boot = trans[boot_idx]
+            weights_boot[i] = compute_weights_from_3d(
+                trans_boot, type_=model_type, scaling=model_scaling
+            )
+            # R: p_values + 1L * (weights_boot[i,,] < threshold)
+            p_values += (weights_boot[i] < threshold).astype(int)
+    else:
+        raise ValueError(f"Unknown method: {method}. Use 'stability' or 'threshold'.")
+
+    # P-values: (count + 1) / (iter + 1)  (R formula)
+    p_values = (p_values + 1) / (iter + 1)
+
+    # Bootstrap statistics
+    weights_mean = np.nanmean(weights_boot, axis=0)
+    weights_sd = np.nanstd(weights_boot, axis=0, ddof=1)  # R's sd uses ddof=1
+
+    # Confidence intervals (quantiles at level/2 and 1-level/2)
+    ci_lower = np.quantile(weights_boot, level / 2, axis=0)
+    ci_upper = np.quantile(weights_boot, 1 - level / 2, axis=0)
+
+    # Significant weights: (p < level) * weights
+    weights_sig = (p_values < level) * weights
+
+    # Consistency range bounds
+    cr_lower = weights * consistency_range[0]
+    cr_upper = weights * consistency_range[1]
+
+    # Build summary DataFrame (R: only non-zero weight edges)
+    weights_vec = weights.flatten(order='F')  # column-major to match R
+    p_vec = p_values.flatten(order='F')
+    sig_vec = (p_values < level).flatten(order='F')
+    cr_lo_vec = cr_lower.flatten(order='F')
+    cr_up_vec = cr_upper.flatten(order='F')
+    ci_lo_vec = ci_lower.flatten(order='F')
+    ci_up_vec = ci_upper.flatten(order='F')
+
+    # Edge names matching R: from = rep(alphabet, times = a), to = rep(alphabet, each = a)
+    from_labels = labels * a
+    to_labels = [l for l in labels for _ in range(a)]
+
+    combined = pd.DataFrame({
+        'from': from_labels,
+        'to': to_labels,
+        'weight': weights_vec,
+        'p_value': p_vec,
+        'sig': sig_vec,
+        'cr_lower': cr_lo_vec,
+        'cr_upper': cr_up_vec,
+        'ci_lower': ci_lo_vec,
+        'ci_upper': ci_up_vec,
+    })
+    # Filter to non-zero weights (R: combined[weights_vec > 0, ])
+    combined = combined[combined['weight'] > 0].reset_index(drop=True)
+
+    # Build pruned model (R: model$weights <- weights_sig)
+    pruned_model = TNA(
+        weights=weights_sig,
+        inits=model.inits.copy(),
+        labels=list(labels),
+        data=seq_data,
+        type_=model_type,
+        scaling=model.scaling if hasattr(model, 'scaling') else [],
+    )
 
     return BootstrapResult(
-        estimate=estimate,
-        replicates=replicates,
-        weights_ci=(weights_lower, weights_upper),
-        inits_ci=(inits_lower, inits_upper),
-        n_boot=n_boot,
-        ci_level=ci
+        weights_orig=weights,
+        weights_sig=weights_sig,
+        weights_mean=weights_mean,
+        weights_sd=weights_sd,
+        p_values=p_values,
+        cr_lower=cr_lower,
+        cr_upper=cr_upper,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        boot_summary=combined,
+        model=pruned_model,
+        labels=list(labels),
+        method=method,
+        iter=iter,
+        level=level,
     )
 
 
 def bootstrap_centralities(
-    data: pd.DataFrame | TNAData,
+    x: TNA | pd.DataFrame | TNAData,
     measures: list[str] | None = None,
-    n_boot: int = 1000,
-    ci: float = 0.95,
+    iter: int = 1000,
+    level: float = 0.05,
     seed: int | None = None,
     type_: str = "relative",
+    scaling: str | list[str] | None = None,
     loops: bool = False,
     normalize: bool = False
 ) -> pd.DataFrame:
     """Bootstrap confidence intervals for centrality measures.
 
+    Uses per-sequence transition resampling (matching R algorithm).
+
     Parameters
     ----------
-    data : pd.DataFrame or TNAData
-        Sequence data in wide format
+    x : TNA, pd.DataFrame, or TNAData
+        TNA model or sequence data
     measures : list of str, optional
         Centrality measures to compute. If None, computes all.
-    n_boot : int
-        Number of bootstrap replicates (default: 1000)
-    ci : float
-        Confidence interval level (default: 0.95)
+    iter : int
+        Number of bootstrap iterations (default: 1000)
+    level : float
+        Significance level (default: 0.05)
     seed : int, optional
         Random seed for reproducibility
     type_ : str
-        Model type for build_model (default: 'relative')
+        Model type when building from data (default: 'relative')
+    scaling : str or list, optional
+        Scaling when building from data
     loops : bool
         Whether to include self-loops in centrality calculations
     normalize : bool
@@ -422,43 +586,60 @@ def bootstrap_centralities(
     -------
     pd.DataFrame
         DataFrame with columns: measure, state, estimate, ci_lower, ci_upper, se
-
-    Examples
-    --------
-    >>> import tna
-    >>> df = tna.load_group_regulation()
-    >>> cent_ci = tna.bootstrap_centralities(df, measures=['OutStrength', 'Betweenness'])
-    >>> print(cent_ci[cent_ci['measure'] == 'OutStrength'])
     """
     if measures is None:
         measures = AVAILABLE_MEASURES.copy()
 
-    # Handle TNAData input
-    if isinstance(data, TNAData):
-        df = data.sequence_data
+    # Handle input
+    if isinstance(x, TNA):
+        model = x
+        seq_data = model.data
+        labels = model.labels
+        model_type = model.type_
+        model_scaling = model.scaling if model.scaling else None
     else:
-        df = data
+        if isinstance(x, TNAData):
+            df = x.sequence_data
+        else:
+            df = x
+        model = build_model(df, type_=type_, scaling=scaling)
+        seq_data = model.data
+        labels = model.labels
+        model_type = type_
+        model_scaling = scaling
 
-    arr = df.values
-    n_sequences = len(arr)
+    if seq_data is None:
+        raise ValueError("Cannot bootstrap: no sequence data available")
+
+    n_sequences = seq_data.shape[0]
+    n_states = len(labels)
     rng = np.random.default_rng(seed)
 
-    # Build original model and compute centralities
-    estimate_model = build_model(df, type_=type_)
-    labels = estimate_model.labels
+    # Compute per-sequence 3D transitions
+    trans = compute_transitions_3d(seq_data, labels, type_=model_type)
+
+    # Original centralities
     estimate_cent = compute_centralities(
-        estimate_model, measures=measures, loops=loops, normalize=normalize
+        model, measures=measures, loops=loops, normalize=normalize
     )
 
-    # Bootstrap centralities
-    n_states = len(labels)
+    # Bootstrap
     n_measures = len(measures)
-    cent_samples = np.zeros((n_boot, n_states, n_measures))
+    cent_samples = np.zeros((iter, n_states, n_measures))
 
-    for b in range(n_boot):
-        indices = rng.choice(n_sequences, size=n_sequences, replace=True)
-        boot_data = pd.DataFrame(arr[indices], columns=df.columns)
-        boot_model = build_model(boot_data, type_=type_, labels=labels)
+    for b in range(iter):
+        boot_idx = rng.choice(n_sequences, size=n_sequences, replace=True)
+        trans_boot = trans[boot_idx]
+        boot_weights = compute_weights_from_3d(
+            trans_boot, type_=model_type, scaling=model_scaling
+        )
+        # Create temporary model for centrality computation
+        boot_model = TNA(
+            weights=boot_weights,
+            inits=model.inits.copy(),
+            labels=list(labels),
+            type_=model_type,
+        )
         boot_cent = compute_centralities(
             boot_model, measures=measures, loops=loops, normalize=normalize
         )
@@ -466,7 +647,6 @@ def bootstrap_centralities(
             cent_samples[b, :, m_idx] = boot_cent[measure].values
 
     # Compute CIs and standard errors
-    alpha = 1 - ci
     rows = []
     for m_idx, measure in enumerate(measures):
         for s_idx, state in enumerate(labels):
@@ -475,9 +655,9 @@ def bootstrap_centralities(
                 'measure': measure,
                 'state': state,
                 'estimate': estimate_cent.loc[state, measure],
-                'ci_lower': np.percentile(values, 100 * alpha / 2),
-                'ci_upper': np.percentile(values, 100 * (1 - alpha / 2)),
-                'se': np.std(values)
+                'ci_lower': np.quantile(values, level / 2),
+                'ci_upper': np.quantile(values, 1 - level / 2),
+                'se': np.std(values, ddof=1)
             })
 
     return pd.DataFrame(rows)
@@ -489,139 +669,249 @@ def bootstrap_centralities(
 
 
 def permutation_test(
-    data1: pd.DataFrame | TNAData,
-    data2: pd.DataFrame | TNAData,
-    n_perm: int = 1000,
-    statistic: str = "weights",
-    measure: str | None = None,
-    alternative: str = "two-sided",
+    x: TNA,
+    y: TNA,
+    iter: int = 1000,
+    adjust: str = "none",
+    paired: bool = False,
+    level: float = 0.05,
+    measures: list[str] | None = None,
     seed: int | None = None,
-    type_: str = "relative"
+    **kwargs
 ) -> PermutationResult:
     """Permutation test for comparing two TNA models.
 
-    Tests the null hypothesis that there is no difference between the two groups.
+    Matches R TNA's permutation_test function exactly. Tests edge-wise
+    differences between two groups using per-sequence transition permutation.
+    Optionally tests centrality differences.
+
+    R equivalent: permutation_test(x, y, adjust, iter, paired, level, measures)
 
     Parameters
     ----------
-    data1 : pd.DataFrame or TNAData
-        First group's sequence data
-    data2 : pd.DataFrame or TNAData
-        Second group's sequence data
-    n_perm : int
-        Number of permutations (default: 1000)
-    statistic : str
-        Test statistic: 'weights' (Frobenius norm of difference),
-        'centrality' (difference in specific centrality measure),
-        'density' (difference in network density)
-    measure : str, optional
-        Centrality measure name when statistic='centrality'
-    alternative : str
-        Alternative hypothesis: 'two-sided', 'greater', 'less'
+    x : TNA
+        First group's TNA model (must have sequence data)
+    y : TNA
+        Second group's TNA model (must have sequence data)
+    iter : int
+        Number of permutation iterations (default: 1000)
+    adjust : str
+        P-value adjustment method: 'none', 'bonferroni', 'fdr'/'BH', 'holm'
+    paired : bool
+        Whether to use paired permutation test
+    level : float
+        Significance level (default: 0.05)
+    measures : list of str, optional
+        Centrality measures to test. If None or empty, only edges are tested.
     seed : int, optional
         Random seed for reproducibility
-    type_ : str
-        Model type for build_model (default: 'relative')
+    **kwargs
+        Additional arguments passed to centralities()
 
     Returns
     -------
     PermutationResult
-        Object containing observed statistic, null distribution, and p-value
+        Object matching R's tna_permutation structure
 
     Examples
     --------
     >>> import tna
     >>> df = tna.load_group_regulation()
-    >>> # Split data (example)
-    >>> df1 = df.iloc[:1000]
-    >>> df2 = df.iloc[1000:]
-    >>> result = tna.permutation_test(df1, df2, n_perm=500)
-    >>> print(f"p-value: {result.p_value:.4f}")
+    >>> model1 = tna.tna(df.iloc[:1000])
+    >>> model2 = tna.tna(df.iloc[1000:])
+    >>> result = tna.permutation_test(model1, model2, iter=500, seed=42)
+    >>> print(result.edges['stats'])
     """
-    # Handle TNAData input
-    if isinstance(data1, TNAData):
-        df1 = data1.sequence_data
-    else:
-        df1 = data1
+    if measures is None:
+        measures = []
 
-    if isinstance(data2, TNAData):
-        df2 = data2.sequence_data
-    else:
-        df2 = data2
+    # Handle backward compat: accept DataFrames as first two args
+    if isinstance(x, (pd.DataFrame, TNAData)):
+        if isinstance(x, TNAData):
+            x = build_model(x.sequence_data, type_="relative")
+        else:
+            x = build_model(x, type_="relative")
+    if isinstance(y, (pd.DataFrame, TNAData)):
+        if isinstance(y, TNAData):
+            y = build_model(y.sequence_data, type_="relative")
+        else:
+            y = build_model(y, type_="relative")
+
+    if x.data is None or y.data is None:
+        raise ValueError("Both TNA models must have sequence data for permutation test")
+
+    data_x = x.data
+    data_y = y.data
+    n_x = data_x.shape[0]
+    n_y = data_y.shape[0]
+
+    if paired and n_x != n_y:
+        raise ValueError("For paired test, both groups must have the same number of sequences")
+
+    labels = x.labels
+    a = len(labels)
+
+    # Verify same labels
+    if len(labels) != len(y.labels) or not all(a == b for a, b in zip(labels, y.labels)):
+        raise ValueError("Both models must have the same state labels in the same order")
+
+    model_type = x.type_
+    model_scaling = x.scaling if x.scaling else None
 
     # Combine data
-    arr1 = df1.values
-    arr2 = df2.values
-    n1, n2 = len(arr1), len(arr2)
-    combined = np.vstack([arr1, arr2])
+    combined_data = np.vstack([data_x, data_y])
+    n_xy = n_x + n_y
+
+    weights_x = x.weights
+    weights_y = y.weights
 
     rng = np.random.default_rng(seed)
 
-    # Get common labels
-    model1 = build_model(df1, type_=type_)
-    model2 = build_model(df2, type_=type_)
-    all_labels = sorted(set(model1.labels) | set(model2.labels))
+    n_measures = len(measures)
+    include_centralities = n_measures > 0
 
-    # Define test statistic function
-    def compute_statistic(group1_data, group2_data):
-        m1 = build_model(
-            pd.DataFrame(group1_data, columns=df1.columns),
-            type_=type_, labels=all_labels
-        )
-        m2 = build_model(
-            pd.DataFrame(group2_data, columns=df2.columns),
-            type_=type_, labels=all_labels
-        )
+    # Compute centrality differences if requested
+    if include_centralities:
+        cent_x = compute_centralities(x, measures=measures, **kwargs)
+        cent_y = compute_centralities(y, measures=measures, **kwargs)
+        cent_diffs_true = cent_x[measures].values - cent_y[measures].values
+        cent_diffs_true_abs = np.abs(cent_diffs_true)
 
-        if statistic == "weights":
-            # Frobenius norm of weight difference
-            return np.linalg.norm(m1.weights - m2.weights, 'fro')
-        elif statistic == "density":
-            # Difference in network density
-            d1 = np.sum(m1.weights > 0) / (len(all_labels) ** 2)
-            d2 = np.sum(m2.weights > 0) / (len(all_labels) ** 2)
-            return d1 - d2
-        elif statistic == "centrality":
-            if measure is None:
-                raise ValueError("measure must be specified for centrality statistic")
-            cent1 = compute_centralities(m1, measures=[measure])
-            cent2 = compute_centralities(m2, measures=[measure])
-            # Mean absolute difference in centrality
-            return np.mean(np.abs(cent1[measure].values - cent2[measure].values))
+    # True edge differences
+    edge_diffs_true = weights_x - weights_y
+    edge_diffs_true_abs = np.abs(edge_diffs_true)
+
+    # Edge names (R format: from -> to)
+    edge_names = []
+    for j in range(a):
+        for i in range(a):
+            edge_names.append(f"{labels[i]} -> {labels[j]}")
+
+    # Compute per-sequence transitions for combined data
+    combined_trans = compute_transitions_3d(combined_data, labels, type_=model_type)
+
+    idx_x = np.arange(n_x)
+    idx_y = np.arange(n_x, n_xy)
+
+    # Permutation loop
+    edge_diffs_perm = np.zeros((iter, a, a))
+    cent_diffs_perm = np.zeros((iter, a, n_measures)) if include_centralities else None
+    edge_p_values = np.zeros((a, a), dtype=int)
+    cent_p_values = np.zeros((a, n_measures), dtype=int) if include_centralities else None
+
+    for i in range(iter):
+        if paired:
+            # Paired permutation: for each pair, randomly swap
+            pair_idx = np.arange(n_xy).reshape(-1, 2)
+            perm_pairs = np.array([rng.permutation(pair) for pair in pair_idx])
+            perm_idx = perm_pairs.flatten()
         else:
-            raise ValueError(f"Unknown statistic: {statistic}")
+            perm_idx = rng.permutation(n_xy)
 
-    # Observed statistic
-    observed = compute_statistic(arr1, arr2)
+        trans_perm_x = combined_trans[perm_idx[idx_x]]
+        trans_perm_y = combined_trans[perm_idx[idx_y]]
 
-    # Permutation distribution
-    null_dist = np.zeros(n_perm)
-    for p in range(n_perm):
-        # Shuffle group labels
-        perm_indices = rng.permutation(n1 + n2)
-        perm_group1 = combined[perm_indices[:n1]]
-        perm_group2 = combined[perm_indices[n1:]]
-        null_dist[p] = compute_statistic(perm_group1, perm_group2)
+        weights_perm_x = compute_weights_from_3d(
+            trans_perm_x, type_=model_type, scaling=model_scaling
+        )
+        weights_perm_y = compute_weights_from_3d(
+            trans_perm_y, type_=model_type, scaling=model_scaling
+        )
 
-    # Compute p-value
-    if alternative == "two-sided":
-        p_value = np.mean(np.abs(null_dist) >= np.abs(observed))
-    elif alternative == "greater":
-        p_value = np.mean(null_dist >= observed)
-    elif alternative == "less":
-        p_value = np.mean(null_dist <= observed)
-    else:
-        raise ValueError(f"Unknown alternative: {alternative}")
+        if include_centralities:
+            model_perm_x = TNA(
+                weights=weights_perm_x, inits=x.inits.copy(),
+                labels=list(labels), type_=model_type,
+            )
+            model_perm_y = TNA(
+                weights=weights_perm_y, inits=y.inits.copy(),
+                labels=list(labels), type_=model_type,
+            )
+            cent_perm_x = compute_centralities(model_perm_x, measures=measures, **kwargs)
+            cent_perm_y = compute_centralities(model_perm_y, measures=measures, **kwargs)
+            cent_diffs_perm[i] = cent_perm_x[measures].values - cent_perm_y[measures].values
+            cent_p_values += (np.abs(cent_diffs_perm[i]) >= cent_diffs_true_abs).astype(int)
 
-    # Ensure p-value is at least 1/(n_perm+1) for finite samples
-    p_value = max(p_value, 1 / (n_perm + 1))
+        edge_diffs_perm[i] = weights_perm_x - weights_perm_y
+        edge_p_values += (np.abs(edge_diffs_perm[i]) >= edge_diffs_true_abs).astype(int)
+
+    # P-values: (count + 1) / (iter + 1)
+    edge_p_values_float = (edge_p_values + 1) / (iter + 1)
+
+    # Apply p-value adjustment (R: p.adjust)
+    edge_p_adjusted = _p_adjust(edge_p_values_float.flatten(), method=adjust)
+    edge_p_values_float = edge_p_adjusted.reshape((a, a))
+
+    # Effect sizes: diff_true / sd(perm_diffs)
+    edge_diffs_sd = np.std(edge_diffs_perm, axis=0, ddof=1)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        edge_effect_size = edge_diffs_true / edge_diffs_sd
+    edge_effect_size[~np.isfinite(edge_effect_size)] = np.nan
+
+    # Significant differences
+    edge_diffs_sig = edge_diffs_true * (edge_p_values_float < level)
+
+    # Build edge stats DataFrame (column-major order to match R)
+    edge_stats = pd.DataFrame({
+        'edge_name': edge_names,
+        'diff_true': edge_diffs_true.flatten(order='F'),
+        'effect_size': edge_effect_size.flatten(order='F'),
+        'p_value': edge_p_values_float.flatten(order='F'),
+    })
+
+    out_edges = {
+        'stats': edge_stats,
+        'diffs_true': edge_diffs_true,
+        'diffs_sig': edge_diffs_sig,
+    }
+
+    out_centralities = None
+    if include_centralities:
+        cent_p_values_float = (cent_p_values + 1) / (iter + 1)
+        cent_p_adjusted = _p_adjust(cent_p_values_float.flatten(), method=adjust)
+        cent_p_values_float = cent_p_adjusted.reshape((a, n_measures))
+
+        cent_diffs_sd = np.std(cent_diffs_perm, axis=0, ddof=1)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cent_effect_size = cent_diffs_true / cent_diffs_sd
+        cent_effect_size[~np.isfinite(cent_effect_size)] = np.nan
+
+        cent_diffs_sig = cent_diffs_true * (cent_p_values_float < level)
+
+        # Build centrality stats DataFrame
+        cent_stats_rows = []
+        for m_idx, measure in enumerate(measures):
+            for s_idx in range(a):
+                cent_stats_rows.append({
+                    'state': labels[s_idx],
+                    'centrality': measure,
+                    'diff_true': cent_diffs_true[s_idx, m_idx],
+                    'effect_size': cent_effect_size[s_idx, m_idx],
+                    'p_value': cent_p_values_float[s_idx, m_idx],
+                })
+        cent_stats = pd.DataFrame(cent_stats_rows)
+
+        # DataFrames for diffs
+        cent_diffs_true_df = pd.DataFrame(
+            cent_diffs_true, index=labels, columns=measures
+        )
+        cent_diffs_true_df.insert(0, 'state', labels)
+
+        cent_diffs_sig_df = pd.DataFrame(
+            cent_diffs_sig, index=labels, columns=measures
+        )
+        cent_diffs_sig_df.insert(0, 'state', labels)
+
+        out_centralities = {
+            'stats': cent_stats,
+            'diffs_true': cent_diffs_true_df,
+            'diffs_sig': cent_diffs_sig_df,
+        }
 
     return PermutationResult(
-        observed=observed,
-        null_distribution=null_dist,
-        p_value=p_value,
-        n_perm=n_perm,
-        alternative=alternative
+        edges=out_edges,
+        centralities=out_centralities,
+        labels=list(labels),
     )
 
 
@@ -629,11 +919,14 @@ def permutation_test_edges(
     data1: pd.DataFrame | TNAData,
     data2: pd.DataFrame | TNAData,
     n_perm: int = 1000,
-    correction: str = "fdr",
+    correction: str = "none",
     seed: int | None = None,
     type_: str = "relative"
 ) -> pd.DataFrame:
     """Test each edge for significant difference between groups.
+
+    Convenience wrapper around permutation_test() that accepts raw data
+    and returns a simple DataFrame.
 
     Parameters
     ----------
@@ -654,96 +947,132 @@ def permutation_test_edges(
     -------
     pd.DataFrame
         DataFrame with columns: from, to, diff, p_value, p_adjusted, significant
-
-    Examples
-    --------
-    >>> import tna
-    >>> df = tna.load_group_regulation()
-    >>> df1 = df.iloc[:1000]
-    >>> df2 = df.iloc[1000:]
-    >>> edges = tna.permutation_test_edges(df1, df2, correction='fdr')
-    >>> sig_edges = edges[edges['significant']]
     """
-    # Handle TNAData input
+    # Build models
     if isinstance(data1, TNAData):
         df1 = data1.sequence_data
     else:
         df1 = data1
-
     if isinstance(data2, TNAData):
         df2 = data2.sequence_data
     else:
         df2 = data2
 
-    arr1 = df1.values
-    arr2 = df2.values
-    n1, n2 = len(arr1), len(arr2)
-    combined = np.vstack([arr1, arr2])
-
-    rng = np.random.default_rng(seed)
-
     # Get common labels
-    model1 = build_model(df1, type_=type_)
-    model2 = build_model(df2, type_=type_)
-    all_labels = sorted(set(model1.labels) | set(model2.labels))
-    n_states = len(all_labels)
+    model1_temp = build_model(df1, type_=type_)
+    model2_temp = build_model(df2, type_=type_)
+    all_labels = sorted(set(model1_temp.labels) | set(model2_temp.labels))
 
-    # Rebuild models with common labels
+    # Build models with common labels
     model1 = build_model(df1, type_=type_, labels=all_labels)
     model2 = build_model(df2, type_=type_, labels=all_labels)
 
-    # Observed differences
-    observed_diff = model1.weights - model2.weights
+    # Map correction name to p.adjust name
+    adjust_map = {'fdr': 'fdr', 'bonferroni': 'bonferroni', 'none': 'none'}
+    adjust = adjust_map.get(correction, correction)
 
-    # Permutation distribution for each edge
-    perm_diffs = np.zeros((n_perm, n_states, n_states))
-    for p in range(n_perm):
-        perm_indices = rng.permutation(n1 + n2)
-        perm_data1 = pd.DataFrame(combined[perm_indices[:n1]], columns=df1.columns)
-        perm_data2 = pd.DataFrame(combined[perm_indices[n1:]], columns=df1.columns)
-        m1 = build_model(perm_data1, type_=type_, labels=all_labels)
-        m2 = build_model(perm_data2, type_=type_, labels=all_labels)
-        perm_diffs[p] = m1.weights - m2.weights
+    # Run permutation test
+    result = permutation_test(
+        model1, model2, iter=n_perm, adjust=adjust, seed=seed
+    )
 
-    # Compute p-values for each edge (two-sided)
-    p_values = np.zeros((n_states, n_states))
-    for i in range(n_states):
-        for j in range(n_states):
-            obs = np.abs(observed_diff[i, j])
-            null = np.abs(perm_diffs[:, i, j])
-            p_values[i, j] = max(np.mean(null >= obs), 1 / (n_perm + 1))
-
-    # Apply multiple testing correction
-    p_flat = p_values.flatten()
-    if correction == "bonferroni":
-        p_adjusted = np.minimum(p_flat * len(p_flat), 1.0)
-    elif correction == "fdr":
-        p_adjusted = _fdr_correction(p_flat)
-    elif correction == "none":
-        p_adjusted = p_flat
-    else:
-        raise ValueError(f"Unknown correction: {correction}")
-
-    p_adjusted = p_adjusted.reshape((n_states, n_states))
-
-    # Build result DataFrame
+    # Convert to legacy format
+    n_states = len(all_labels)
     rows = []
     for i in range(n_states):
         for j in range(n_states):
             rows.append({
                 'from': all_labels[i],
                 'to': all_labels[j],
-                'diff': observed_diff[i, j],
-                'p_value': p_values[i, j],
-                'p_adjusted': p_adjusted[i, j],
-                'significant': p_adjusted[i, j] < 0.05
+                'diff': result.edges['diffs_true'][i, j],
+                'p_value': result.edges['stats'].iloc[i * n_states + j]['p_value']
+                if len(result.edges['stats']) == n_states * n_states else 0,
+                'p_adjusted': result.edges['stats'].iloc[i * n_states + j]['p_value']
+                if len(result.edges['stats']) == n_states * n_states else 0,
+                'significant': False,
+            })
+
+    df_result = pd.DataFrame(rows)
+    # The edge stats are in column-major order; rebuild p_values in row-major
+    p_matrix = np.zeros((n_states, n_states))
+    for idx, row in result.edges['stats'].iterrows():
+        # Parse edge name to get indices
+        parts = row['edge_name'].split(' -> ')
+        from_label = parts[0]
+        to_label = parts[1]
+        i = all_labels.index(from_label)
+        j = all_labels.index(to_label)
+        p_matrix[i, j] = row['p_value']
+
+    rows = []
+    for i in range(n_states):
+        for j in range(n_states):
+            rows.append({
+                'from': all_labels[i],
+                'to': all_labels[j],
+                'diff': result.edges['diffs_true'][i, j],
+                'p_value': p_matrix[i, j],
+                'p_adjusted': p_matrix[i, j],
+                'significant': p_matrix[i, j] < 0.05,
             })
 
     return pd.DataFrame(rows)
 
 
+# -----------------------------------------------------------------------------
+# P-value adjustment
+# -----------------------------------------------------------------------------
+
+
+def _p_adjust(p_values: np.ndarray, method: str = "none") -> np.ndarray:
+    """Adjust p-values for multiple testing.
+
+    Matches R's p.adjust() function.
+
+    Parameters
+    ----------
+    p_values : np.ndarray
+        Array of p-values
+    method : str
+        Adjustment method: 'none', 'bonferroni', 'holm', 'fdr'/'BH'
+
+    Returns
+    -------
+    np.ndarray
+        Adjusted p-values
+    """
+    p = np.asarray(p_values, dtype=float)
+    n = len(p)
+
+    if method == "none":
+        return p.copy()
+
+    elif method == "bonferroni":
+        return np.minimum(p * n, 1.0)
+
+    elif method == "holm":
+        # Holm step-down
+        sorted_idx = np.argsort(p)
+        sorted_p = p[sorted_idx]
+        adjusted = np.zeros(n)
+        cummax = 0.0
+        for i in range(n):
+            val = sorted_p[i] * (n - i)
+            cummax = max(cummax, val)
+            adjusted[sorted_idx[i]] = cummax
+        return np.minimum(adjusted, 1.0)
+
+    elif method in ("fdr", "BH"):
+        return _fdr_correction(p)
+
+    else:
+        raise ValueError(f"Unknown p.adjust method: {method}")
+
+
 def _fdr_correction(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
     """Benjamini-Hochberg FDR correction.
+
+    Matches R's p.adjust(method = "BH").
 
     Parameters
     ----------
@@ -761,7 +1090,7 @@ def _fdr_correction(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
     sorted_idx = np.argsort(p_values)
     sorted_p = p_values[sorted_idx]
 
-    # BH procedure
+    # BH procedure: cumulative minimum of n/i * p[i] from largest to smallest
     adjusted = np.zeros(n)
     adjusted[sorted_idx[-1]] = sorted_p[-1]
 
@@ -786,16 +1115,16 @@ def plot_bootstrap(
     figsize: tuple[float, float] = (10, 8),
     cmap: str = "RdBu_r"
 ) -> Figure:
-    """Visualize bootstrap distributions and confidence intervals.
+    """Visualize bootstrap results.
 
     Parameters
     ----------
     result : BootstrapResult
         Result from bootstrap_tna()
     plot_type : str
-        What to plot: 'weights' or 'centrality'
+        What to plot: 'weights', 'pvalues', or 'significance'
     measure : str, optional
-        Centrality measure when plot_type='centrality'
+        Centrality measure for centrality plots
     figsize : tuple
         Figure size
     cmap : str
@@ -810,41 +1139,40 @@ def plot_bootstrap(
     except ImportError:
         raise ImportError("Plotting requires matplotlib. Install with: pip install matplotlib")
 
-    if plot_type == "weights":
-        # Plot weight estimates with CIs as error bars or heatmap
-        labels = result.estimate.labels
-        n = len(labels)
+    labels = result.labels
+    n = len(labels)
 
+    if plot_type == "weights":
         fig, axes = plt.subplots(1, 3, figsize=figsize)
 
         # Point estimate
-        im0 = axes[0].imshow(result.estimate.weights, cmap=cmap, aspect='equal')
+        im0 = axes[0].imshow(result.weights_orig, cmap=cmap, aspect='equal')
         axes[0].set_xticks(range(n))
         axes[0].set_yticks(range(n))
         axes[0].set_xticklabels(labels, rotation=45, ha='right')
         axes[0].set_yticklabels(labels)
-        axes[0].set_title('Point Estimate')
+        axes[0].set_title('Original Weights')
         plt.colorbar(im0, ax=axes[0], shrink=0.8)
 
-        # CI width (uncertainty)
-        ci_width = result.weights_ci[1] - result.weights_ci[0]
+        # CI width
+        ci_width = result.ci_upper - result.ci_lower
         im1 = axes[1].imshow(ci_width, cmap='YlOrRd', aspect='equal')
         axes[1].set_xticks(range(n))
         axes[1].set_yticks(range(n))
         axes[1].set_xticklabels(labels, rotation=45, ha='right')
         axes[1].set_yticklabels(labels)
-        axes[1].set_title(f'{int(result.ci_level * 100)}% CI Width')
+        axes[1].set_title(f'{int((1 - result.level) * 100)}% CI Width')
         plt.colorbar(im1, ax=axes[1], shrink=0.8)
 
-        # Significance (CI excludes 0)
-        sig = ((result.weights_ci[0] > 0) | (result.weights_ci[1] < 0)).astype(float)
-        sig[result.estimate.weights == 0] = 0.5  # Gray for zero weights
+        # Significance
+        sig = (result.p_values < result.level).astype(float)
+        sig[result.weights_orig == 0] = 0.5
         im2 = axes[2].imshow(sig, cmap='RdYlGn', vmin=0, vmax=1, aspect='equal')
         axes[2].set_xticks(range(n))
         axes[2].set_yticks(range(n))
         axes[2].set_xticklabels(labels, rotation=45, ha='right')
         axes[2].set_yticklabels(labels)
-        axes[2].set_title('Significant (CI excludes 0)')
+        axes[2].set_title(f'Significant (p < {result.level})')
         cbar = plt.colorbar(im2, ax=axes[2], shrink=0.8)
         cbar.set_ticks([0, 0.5, 1])
         cbar.set_ticklabels(['No', 'N/A', 'Yes'])
@@ -856,37 +1184,11 @@ def plot_bootstrap(
         if measure is None:
             raise ValueError("measure must be specified for centrality plot")
 
-        # Compute centralities for all replicates
-        labels = result.estimate.labels
-        n = len(labels)
-
-        cent_values = np.zeros((result.n_boot, n))
-        for b, rep in enumerate(result.replicates):
-            cent = compute_centralities(rep, measures=[measure])
-            cent_values[b] = cent[measure].values
-
-        # Point estimate
-        orig_cent = compute_centralities(result.estimate, measures=[measure])
-
         fig, ax = plt.subplots(figsize=figsize)
-
-        # Box plots
-        positions = np.arange(n)
-        bp = ax.boxplot([cent_values[:, i] for i in range(n)],
-                       positions=positions, widths=0.6, patch_artist=True)
-
-        # Overlay point estimates
-        ax.scatter(positions, orig_cent[measure].values,
-                  color='red', s=100, zorder=5, label='Point estimate')
-
-        ax.set_xticks(positions)
+        ax.bar(range(n), result.weights_mean.sum(axis=1))
+        ax.set_xticks(range(n))
         ax.set_xticklabels(labels, rotation=45, ha='right')
-        ax.set_ylabel(measure)
-        ax.set_title(f'Bootstrap Distribution: {measure}')
-        ax.legend()
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
+        ax.set_title(f'Bootstrap Mean Weights ({measure})')
         plt.tight_layout()
         return fig
 
@@ -901,7 +1203,7 @@ def plot_permutation(
     bins: int = 30,
     color: str = "lightblue"
 ) -> Axes:
-    """Plot null distribution with observed statistic.
+    """Plot permutation test results.
 
     Parameters
     ----------
@@ -928,23 +1230,24 @@ def plot_permutation(
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
 
-    # Plot null distribution
-    ax.hist(result.null_distribution, bins=bins, color=color,
-            edgecolor='black', alpha=0.7, label='Null distribution')
+    # Plot p-value distribution
+    p_vals = result.edges['stats']['p_value'].values
+    ax.hist(p_vals, bins=bins, color=color,
+            edgecolor='black', alpha=0.7, label='Edge p-values')
 
-    # Add observed statistic line
-    ax.axvline(result.observed, color='red', linewidth=2,
-               linestyle='--', label=f'Observed = {result.observed:.4f}')
+    # Add significance threshold line
+    ax.axvline(0.05, color='red', linewidth=2,
+               linestyle='--', label='p = 0.05')
 
-    # Add p-value annotation
-    if isinstance(result.p_value, (float, np.floating)):
-        ax.text(0.95, 0.95, f'p = {result.p_value:.4f}',
-                transform=ax.transAxes, ha='right', va='top',
-                fontsize=12, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    n_sig = np.sum(p_vals < 0.05)
+    n_total = len(p_vals)
+    ax.text(0.95, 0.95, f'{n_sig}/{n_total} significant edges',
+            transform=ax.transAxes, ha='right', va='top',
+            fontsize=12, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
-    ax.set_xlabel('Test Statistic')
+    ax.set_xlabel('P-value')
     ax.set_ylabel('Frequency')
-    ax.set_title(f'Permutation Test (n={result.n_perm})')
+    ax.set_title('Permutation Test Edge P-values')
     ax.legend()
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -976,7 +1279,7 @@ def plot_network_ci(
     layout : str
         Network layout algorithm
     **kwargs
-        Additional arguments passed to plot_network()
+        Additional arguments
 
     Returns
     -------
@@ -992,9 +1295,9 @@ def plot_network_ci(
     from .plot import _get_layout
     from .colors import color_palette
 
-    model = bootstrap_result.estimate
-    labels = model.labels
+    labels = bootstrap_result.labels
     n = len(labels)
+    weights = bootstrap_result.weights_orig
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -1004,7 +1307,7 @@ def plot_network_ci(
 
     for i, from_label in enumerate(labels):
         for j, to_label in enumerate(labels):
-            weight = model.weights[i, j]
+            weight = weights[i, j]
             if weight > 0:
                 G.add_edge(from_label, to_label, weight=weight)
 
@@ -1029,30 +1332,23 @@ def plot_network_ci(
         j = labels.index(v)
         weight = data['weight']
 
-        # Width based on weight
-        edge_widths.append(0.5 + 4.5 * weight / model.weights.max())
+        edge_widths.append(0.5 + 4.5 * weight / weights.max())
 
-        # Alpha based on significance or CI width
         if edge_alpha == "significance":
-            lower = bootstrap_result.weights_ci[0][i, j]
-            upper = bootstrap_result.weights_ci[1][i, j]
-            # Significant if CI doesn't include 0
-            is_sig = lower > 0 or upper < 0
+            is_sig = bootstrap_result.p_values[i, j] < bootstrap_result.level
             edge_alphas.append(0.9 if is_sig else 0.2)
         elif edge_alpha == "ci_width":
-            ci_width = bootstrap_result.weights_ci[1][i, j] - bootstrap_result.weights_ci[0][i, j]
-            max_width = np.max(bootstrap_result.weights_ci[1] - bootstrap_result.weights_ci[0])
-            # Narrower CI = more certain = higher alpha
-            if max_width > 0:
-                edge_alphas.append(0.9 - 0.7 * ci_width / max_width)
+            ci_w = bootstrap_result.ci_upper[i, j] - bootstrap_result.ci_lower[i, j]
+            max_w = np.max(bootstrap_result.ci_upper - bootstrap_result.ci_lower)
+            if max_w > 0:
+                edge_alphas.append(0.9 - 0.7 * ci_w / max_w)
             else:
                 edge_alphas.append(0.9)
         else:
             edge_alphas.append(0.7)
 
-    # Draw edges with varying alpha (need to draw individually)
     for idx, (u, v, data) in enumerate(edges):
-        if u != v:  # Skip self-loops for now
+        if u != v:
             nx.draw_networkx_edges(
                 G, pos,
                 edgelist=[(u, v)],
@@ -1065,12 +1361,11 @@ def plot_network_ci(
                 ax=ax
             )
 
-    # Add legend
     sig_patch = mpatches.Patch(color='gray', alpha=0.9, label='Significant')
     nonsig_patch = mpatches.Patch(color='gray', alpha=0.2, label='Non-significant')
     ax.legend(handles=[sig_patch, nonsig_patch], loc='upper left')
 
-    ax.set_title(f'TNA Network with {int(bootstrap_result.ci_level * 100)}% CI', fontweight='bold')
+    ax.set_title(f'TNA Network (p < {bootstrap_result.level})', fontweight='bold')
     ax.set_axis_off()
     ax.margins(0.1)
 

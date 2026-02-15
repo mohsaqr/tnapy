@@ -1,7 +1,8 @@
 """Tests for numerical equivalence with R TNA package.
 
 These tests verify that Python TNA produces identical results to R TNA.
-To generate expected values, run tests/r_verification.R in R.
+Expected values are hardcoded from R TNA 1.2.0 / igraph 2.2.1 output.
+To regenerate expected values, run tests/r_verification.R in R.
 """
 
 import numpy as np
@@ -10,12 +11,100 @@ import pytest
 
 import tna
 
-# Expected values from R TNA package
-# These can be updated by running r_verification.R
+# ── R ground truth: state ordering ──────────────────────────────────────────
+# R TNA labels (alphabetical): adapt, cohesion, consensus, coregulate,
+#   discuss, emotion, monitor, plan, synthesis
+STATES = [
+    'adapt', 'cohesion', 'consensus', 'coregulate',
+    'discuss', 'emotion', 'monitor', 'plan', 'synthesis'
+]
+
+# ── R ground truth: full 9×9 weight matrix (tna(group_regulation)$weights) ──
+# fmt: off
+R_WEIGHT_MATRIX = np.array([
+    [0.000000000000000, 0.273084479371316, 0.477406679764244, 0.021611001964637, 0.058939096267191, 0.119842829076621, 0.033398821218075, 0.015717092337917, 0.000000000000000],
+    [0.002949852507375, 0.027138643067847, 0.497935103244838, 0.119174041297935, 0.059587020648968, 0.115634218289086, 0.033038348082596, 0.141002949852507, 0.003539823008850],
+    [0.004740085321536, 0.014852267340812, 0.082003476062569, 0.187707378732817, 0.188023384420920, 0.072681308263549, 0.046610838995102, 0.395797124348238, 0.007584136514457],
+    [0.016243654822335, 0.036040609137056, 0.134517766497462, 0.023350253807107, 0.273604060913706, 0.172081218274112, 0.086294416243655, 0.239086294416244, 0.018781725888325],
+    [0.071374335611238, 0.047582890407492, 0.321184510250569, 0.084282460136674, 0.194887370286004, 0.105796001012402, 0.022272842318400, 0.011642622120982, 0.140976967856239],
+    [0.002467395135707, 0.325343672893902, 0.320408882622489, 0.034191046880508, 0.101868170602749, 0.076841734226295, 0.036305956996828, 0.099753260486429, 0.002819880155093],
+    [0.011165387299372, 0.055826936496860, 0.159106769016050, 0.057920446615492, 0.375436147941382, 0.090718771807397, 0.018143754361479, 0.215631542219121, 0.016050244242847],
+    [0.000974500568459, 0.025174598018516, 0.290401169400682, 0.017216176709436, 0.067890206269287, 0.146824752314439, 0.075523794055547, 0.374208218288127, 0.001786584375508],
+    [0.234662576687117, 0.033742331288344, 0.466257668711656, 0.044478527607362, 0.062883435582822, 0.070552147239264, 0.012269938650307, 0.075153374233129, 0.000000000000000],
+])
+# fmt: on
+
+# ── R ground truth: initial probabilities ────────────────────────────────────
+R_INITS = np.array([0.0115, 0.0605, 0.214, 0.019, 0.1755, 0.1515, 0.144, 0.2045, 0.0195])
+
+# ── R ground truth: centralities(model, loops=FALSE) ────────────────────────
+R_CENTRALITIES = {
+    'OutStrength': np.array([
+        1.000000000000000, 0.972861356932153, 0.917996523937431,
+        0.976649746192893, 0.805112629713996, 0.923158265773705,
+        0.981856245638521, 0.625791781711873, 1.000000000000000,
+    ]),
+    'InStrength': np.array([
+        0.344577787953137, 0.811647784954297, 2.667218549507990,
+        0.566581079944861, 1.188231522647023, 0.894131246276868,
+        0.345714956560509, 1.193784260014568, 0.191539362041319,
+    ]),
+    'ClosenessIn': np.array([
+        0.008339570131235, 0.013800358906669, 0.035123315719608,
+        0.015546719101785, 0.019591856586706, 0.014102579452180,
+        0.007580598453937, 0.027426128875219, 0.009967580555985,
+    ]),
+    'ClosenessOut': np.array([
+        0.015168577227034, 0.012386811515627, 0.012535497744412,
+        0.015004153699868, 0.013071651541832, 0.012056070286577,
+        0.013684054771456, 0.011509488834405, 0.015790195673322,
+    ]),
+    'Closeness': np.array([
+        0.024792561875215, 0.026543117094488, 0.038294808609938,
+        0.021041713513592, 0.027104254929150, 0.023112084770781,
+        0.019277663165081, 0.027426128875219, 0.024315306503490,
+    ]),
+    'Betweenness': np.array([1.0, 0.0, 30.0, 0.0, 16.0, 5.0, 0.0, 9.0, 7.0]),
+    'BetweennessRSP': np.array([1.0, 19.0, 103.0, 27.0, 53.0, 36.0, 11.0, 61.0, 3.0]),
+    'Diffusion': np.array([
+        5.586291969638066, 5.208632770201142, 4.659727805733428,
+        5.147938118060861, 4.627576670649398, 5.069888019796327,
+        5.156836527833763, 3.487528601796722, 5.582502363886841,
+    ]),
+    'Clustering': np.array([
+        0.336983862677757, 0.299648677165664, 0.160777291853848,
+        0.305784186111251, 0.239710760651376, 0.290479309565872,
+        0.288881938704651, 0.287490437349879, 0.358613621392574,
+    ]),
+}
+
+# ── R ground truth: frequency model (ftna) ──────────────────────────────────
+# fmt: off
+R_FREQ_MATRIX = np.array([
+    [  0, 139, 243,  11,  30,  61,  17,   8,   0],
+    [  5,  46, 844, 202, 101, 196,  56, 239,   6],
+    [ 30,  94, 519,1188,1190, 460, 295,2505,  48],
+    [ 32,  71, 265,  46, 539, 339, 170, 471,  37],
+    [282, 188,1269, 333, 770, 418,  88,  46, 557],
+    [  7, 923, 909,  97, 289, 218, 103, 283,   8],
+    [ 16,  80, 228,  83, 538, 130,  26, 309,  23],
+    [  6, 155,1788, 106, 418, 904, 465,2304,  11],
+    [153,  22, 304,  29,  41,  46,   8,  49,   0],
+], dtype=float)
+# fmt: on
+
+# NOTE: R ctna uses window-based co-occurrence counting, while Python ctna
+# counts only adjacent bidirectional pairs. Raw counts differ by design.
+# We validate structural properties (symmetry, row-normalization) instead.
+
+
+def _label_to_idx(model):
+    """Map state label to index for the given model."""
+    return {label: i for i, label in enumerate(model.labels)}
 
 
 class TestREquivalence:
-    """Tests for numerical equivalence with R TNA package."""
+    """Tests for exact numerical equivalence with R TNA package."""
 
     @pytest.fixture
     def r_model(self):
@@ -30,11 +119,7 @@ class TestREquivalence:
 
     def test_model_labels(self, r_model):
         """Verify state labels match R."""
-        expected_labels = {
-            'adapt', 'cohesion', 'consensus', 'coregulate',
-            'discuss', 'emotion', 'monitor', 'plan', 'synthesis'
-        }
-        assert set(r_model.labels) == expected_labels
+        assert set(r_model.labels) == set(STATES)
 
     def test_weight_matrix_shape(self, r_model):
         """Verify weight matrix dimensions."""
@@ -45,95 +130,169 @@ class TestREquivalence:
         row_sums = r_model.weights.sum(axis=1)
         np.testing.assert_array_almost_equal(row_sums, np.ones(9), decimal=10)
 
-    def test_weight_matrix_values(self, r_model):
-        """Verify specific weight matrix values match R.
+    def test_weight_matrix_exact(self, r_model):
+        """Verify full 9x9 weight matrix matches R within 1e-12."""
+        idx = _label_to_idx(r_model)
+        # Reorder R matrix to match Python label ordering
+        order = [STATES.index(label) for label in r_model.labels]
+        expected = R_WEIGHT_MATRIX[np.ix_(order, order)]
+        np.testing.assert_array_almost_equal(
+            r_model.weights, expected, decimal=12,
+            err_msg="Weight matrix differs from R output"
+        )
 
-        Expected values from R:
-        > model <- tna(group_regulation)
-        > round(model$weights, 4)
-        """
-        # Key transition probabilities to verify
-        # These should match R output exactly
-
-        # Get index mapping
-        label_to_idx = {l: i for i, l in enumerate(r_model.labels)}
-
-        # Verify some key transitions (from R output)
-        # consensus -> plan should be high (~0.3958)
-        consensus_idx = label_to_idx['consensus']
-        plan_idx = label_to_idx['plan']
-        assert 0.39 < r_model.weights[consensus_idx, plan_idx] < 0.40
-
-        # cohesion -> consensus should be high (~0.4979)
-        cohesion_idx = label_to_idx['cohesion']
-        assert 0.49 < r_model.weights[cohesion_idx, consensus_idx] < 0.51
+    def test_initial_probabilities_exact(self, r_model):
+        """Verify initial probabilities match R within 1e-12."""
+        idx = _label_to_idx(r_model)
+        for state_i, state in enumerate(STATES):
+            py_idx = idx[state]
+            np.testing.assert_almost_equal(
+                r_model.inits[py_idx], R_INITS[state_i], decimal=12,
+                err_msg=f"Initial prob for {state} differs from R"
+            )
 
     def test_initial_probabilities_sum(self, r_model):
         """Verify initial probabilities sum to 1."""
         assert abs(r_model.inits.sum() - 1.0) < 1e-10
 
-    def test_strength_centralities(self, r_model):
-        """Verify strength centralities match R igraph."""
-        cent = tna.centralities(r_model, measures=['OutStrength', 'InStrength'])
 
-        # OutStrength should equal row sums of weight matrix
-        # (which is 1 for row-stochastic matrix without self-loops removed)
-        out_strength = r_model.weights.sum(axis=1)
+class TestCentralitiesRValues:
+    """Tests for all 9 centrality measures against hardcoded R values."""
 
-        # After removing diagonal, out_strength may differ
-        weights_no_diag = r_model.weights.copy()
-        np.fill_diagonal(weights_no_diag, 0)
-        expected_out = weights_no_diag.sum(axis=1)
-        expected_in = weights_no_diag.sum(axis=0)
+    @pytest.fixture
+    def model(self):
+        """Build model from group_regulation data."""
+        df = tna.load_group_regulation()
+        return tna.tna(df)
 
-        for i, label in enumerate(r_model.labels):
+    @pytest.fixture
+    def cent(self, model):
+        """Compute all centralities with loops=FALSE."""
+        return tna.centralities(model, loops=False)
+
+    def _check_measure(self, cent, model, measure, decimal=10):
+        """Assert a centrality measure matches R values."""
+        idx = _label_to_idx(model)
+        for state_i, state in enumerate(STATES):
+            py_idx = idx[state]
             np.testing.assert_almost_equal(
-                cent.loc[label, 'OutStrength'],
-                expected_out[i],
-                decimal=10
-            )
-            np.testing.assert_almost_equal(
-                cent.loc[label, 'InStrength'],
-                expected_in[i],
-                decimal=10
+                cent.loc[model.labels[py_idx], measure],
+                R_CENTRALITIES[measure][state_i],
+                decimal=decimal,
+                err_msg=f"{measure} for {state} differs from R"
             )
 
-    def test_diffusion_centrality(self, r_model):
-        """Verify diffusion centrality computation."""
-        cent = tna.centralities(r_model, measures=['Diffusion'])
+    def test_outstrength(self, cent, model):
+        """OutStrength matches R igraph::strength(mode='out')."""
+        self._check_measure(cent, model, 'OutStrength')
 
-        # Diffusion should be positive for all nodes
-        assert all(cent['Diffusion'] > 0)
+    def test_instrength(self, cent, model):
+        """InStrength matches R igraph::strength(mode='in')."""
+        self._check_measure(cent, model, 'InStrength')
 
-        # Diffusion values should be reasonable (not infinity or nan)
-        assert all(np.isfinite(cent['Diffusion']))
+    def test_closeness_in(self, cent, model):
+        """ClosenessIn matches R igraph::closeness(mode='in')."""
+        self._check_measure(cent, model, 'ClosenessIn')
 
-    def test_clustering_coefficient(self, r_model):
-        """Verify clustering coefficient computation."""
-        cent = tna.centralities(r_model, measures=['Clustering'])
+    def test_closeness_out(self, cent, model):
+        """ClosenessOut matches R igraph::closeness(mode='out')."""
+        self._check_measure(cent, model, 'ClosenessOut')
 
-        # Clustering should be in [0, 1] range for normalized networks
-        # For raw networks, it can exceed 1
-        assert all(np.isfinite(cent['Clustering']))
+    def test_closeness_all(self, cent, model):
+        """Closeness matches R igraph::closeness(mode='all')."""
+        self._check_measure(cent, model, 'Closeness')
 
-    def test_frequency_model(self, group_regulation_data):
-        """Verify frequency model produces raw counts."""
-        fmodel = tna.ftna(group_regulation_data)
+    def test_betweenness(self, cent, model):
+        """Betweenness matches R igraph::betweenness()."""
+        self._check_measure(cent, model, 'Betweenness')
 
-        # Frequency model should have integer-like values (counts)
-        # All values should be non-negative
+    def test_betweenness_rsp(self, cent, model):
+        """BetweennessRSP matches R tna::rsp_bet()."""
+        self._check_measure(cent, model, 'BetweennessRSP')
+
+    def test_diffusion(self, cent, model):
+        """Diffusion matches R tna::diffusion()."""
+        self._check_measure(cent, model, 'Diffusion')
+
+    def test_clustering(self, cent, model):
+        """Clustering matches R tna::wcc()."""
+        self._check_measure(cent, model, 'Clustering')
+
+    def test_all_measures_present(self, cent):
+        """All 9 centrality measures are computed."""
+        assert len(cent.columns) == len(tna.AVAILABLE_MEASURES)
+        assert all(m in cent.columns for m in tna.AVAILABLE_MEASURES)
+
+    def test_normalized_centralities_range(self, model):
+        """Normalized centralities should be in [0, 1] range."""
+        cent = tna.centralities(model, normalize=True)
+        for col in cent.columns:
+            if all(np.isfinite(cent[col])):
+                assert cent[col].min() >= -1e-10, f"{col} min below 0"
+                assert cent[col].max() <= 1.0 + 1e-10, f"{col} max above 1"
+
+    def test_loops_parameter_effect(self, model):
+        """Loops parameter should affect results when self-loops exist."""
+        cent_no_loops = tna.centralities(model, loops=False)
+        cent_with_loops = tna.centralities(model, loops=True)
+        assert len(cent_no_loops) == len(cent_with_loops)
+
+
+class TestFrequencyModelRValues:
+    """Tests for frequency model against hardcoded R values."""
+
+    @pytest.fixture
+    def fmodel(self):
+        """Build frequency model from group_regulation data."""
+        df = tna.load_group_regulation()
+        return tna.ftna(df)
+
+    def test_frequency_matrix_exact(self, fmodel):
+        """Verify full 9x9 frequency matrix matches R exactly."""
+        idx = _label_to_idx(fmodel)
+        order = [STATES.index(label) for label in fmodel.labels]
+        expected = R_FREQ_MATRIX[np.ix_(order, order)]
+        np.testing.assert_array_equal(
+            fmodel.weights, expected,
+            err_msg="Frequency matrix differs from R output"
+        )
+
+    def test_frequency_total(self, fmodel):
+        """Total transition count matches R."""
+        assert fmodel.weights.sum() == R_FREQ_MATRIX.sum()
+
+    def test_frequency_nonnegative(self, fmodel):
+        """All frequency counts are non-negative."""
         assert np.all(fmodel.weights >= 0)
 
-        # Total transitions should be large (many sequences)
-        assert fmodel.weights.sum() > 1000
 
-    def test_cooccurrence_model(self, group_regulation_data):
-        """Verify co-occurrence model is symmetric after computation."""
-        cmodel = tna.ctna(group_regulation_data)
+class TestCooccurrenceModelRValues:
+    """Tests for co-occurrence model structural properties.
 
-        # Row-normalized, so rows should sum to 1
+    NOTE: Python ctna counts adjacent bidirectional co-occurrences,
+    while R ctna uses window-based counting. Raw counts differ by design.
+    We validate structural properties here instead of exact R values.
+    """
+
+    @pytest.fixture
+    def cmodel(self):
+        """Build co-occurrence model from group_regulation data."""
+        df = tna.load_group_regulation()
+        return tna.ctna(df)
+
+    def test_cooccurrence_row_stochastic(self, cmodel):
+        """Co-occurrence model should be row-normalized (rows sum to 1)."""
         row_sums = cmodel.weights.sum(axis=1)
         np.testing.assert_array_almost_equal(row_sums, np.ones(9), decimal=10)
+
+    def test_cooccurrence_nonnegative(self, cmodel):
+        """All co-occurrence weights should be non-negative."""
+        assert np.all(cmodel.weights >= 0)
+
+    def test_cooccurrence_correct_states(self, cmodel):
+        """Co-occurrence model should have 9 states."""
+        assert cmodel.weights.shape == (9, 9)
+        assert set(cmodel.labels) == set(STATES)
 
 
 class TestAllModelTypes:
@@ -164,25 +323,19 @@ class TestAllModelTypes:
         """Frequency model should have non-negative integer-like counts."""
         model = tna.build_model(simple_data, type_='frequency')
         assert np.all(model.weights >= 0)
-        # Total should equal number of transitions
         total_transitions = (len(simple_data.columns) - 1) * len(simple_data)
-        # Account for NA handling
         assert model.weights.sum() <= total_transitions
 
     def test_cooccurrence_model_structure(self, simple_data):
         """Co-occurrence model should have valid structure."""
         model = tna.build_model(simple_data, type_='co-occurrence')
-        # After row-normalization, rows should sum to 1
         row_sums = model.weights.sum(axis=1)
         np.testing.assert_array_almost_equal(row_sums, np.ones(3), decimal=10)
 
     def test_reverse_model_different(self, simple_data):
         """Reverse model should differ from forward model."""
-        fwd = tna.build_model(simple_data, type_='relative')
         rev = tna.build_model(simple_data, type_='reverse')
-        # Matrices should be different (unless data is perfectly symmetric)
         assert rev.type_ == 'reverse'
-        # Reverse should also be row-stochastic
         row_sums = rev.weights.sum(axis=1)
         np.testing.assert_array_almost_equal(row_sums, np.ones(3), decimal=10)
 
@@ -232,7 +385,6 @@ class TestAllModelTypes:
             assert model.weights.shape == (9, 9)
             assert len(model.labels) == 9
 
-            # For normalized types, check row sums
             if type_ not in ['frequency']:
                 row_sums = model.weights.sum(axis=1)
                 np.testing.assert_array_almost_equal(
@@ -241,114 +393,20 @@ class TestAllModelTypes:
                 )
 
 
-class TestAllCentralityMeasures:
-    """Tests for all 9 centrality measures."""
-
-    @pytest.fixture
-    def model(self):
-        """Build model from group_regulation data."""
-        df = tna.load_group_regulation()
-        return tna.tna(df)
-
-    def test_all_measures_compute(self, model):
-        """All centrality measures should compute without error."""
-        cent = tna.centralities(model)
-        assert len(cent.columns) == len(tna.AVAILABLE_MEASURES)
-        assert all(m in cent.columns for m in tna.AVAILABLE_MEASURES)
-
-    def test_outstrength_properties(self, model):
-        """OutStrength should have valid properties."""
-        cent = tna.centralities(model, measures=['OutStrength'])
-        # All values should be finite and non-negative
-        assert all(np.isfinite(cent['OutStrength']))
-        assert all(cent['OutStrength'] >= 0)
-
-    def test_instrength_properties(self, model):
-        """InStrength should have valid properties."""
-        cent = tna.centralities(model, measures=['InStrength'])
-        # All values should be finite and non-negative
-        assert all(np.isfinite(cent['InStrength']))
-        assert all(cent['InStrength'] >= 0)
-
-    def test_closeness_in_properties(self, model):
-        """ClosenessIn should have valid properties."""
-        cent = tna.centralities(model, measures=['ClosenessIn'])
-        assert all(np.isfinite(cent['ClosenessIn']))
-        assert all(cent['ClosenessIn'] >= 0)
-
-    def test_closeness_out_properties(self, model):
-        """ClosenessOut should have valid properties."""
-        cent = tna.centralities(model, measures=['ClosenessOut'])
-        assert all(np.isfinite(cent['ClosenessOut']))
-        assert all(cent['ClosenessOut'] >= 0)
-
-    def test_closeness_all_properties(self, model):
-        """Closeness (all modes) should have valid properties."""
-        cent = tna.centralities(model, measures=['Closeness'])
-        assert all(np.isfinite(cent['Closeness']))
-        assert all(cent['Closeness'] >= 0)
-
-    def test_betweenness_properties(self, model):
-        """Betweenness should have valid properties."""
-        cent = tna.centralities(model, measures=['Betweenness'])
-        assert all(np.isfinite(cent['Betweenness']))
-        assert all(cent['Betweenness'] >= 0)
-
-    def test_betweenness_rsp_properties(self, model):
-        """BetweennessRSP should have valid properties."""
-        cent = tna.centralities(model, measures=['BetweennessRSP'])
-        # BetweennessRSP can return NaN if matrix has zero rows
-        # For valid matrices, values should be positive
-        if all(np.isfinite(cent['BetweennessRSP'])):
-            assert all(cent['BetweennessRSP'] >= 0)
-
-    def test_diffusion_properties(self, model):
-        """Diffusion should have valid properties."""
-        cent = tna.centralities(model, measures=['Diffusion'])
-        assert all(np.isfinite(cent['Diffusion']))
-        assert all(cent['Diffusion'] > 0)  # Should be strictly positive
-
-    def test_clustering_properties(self, model):
-        """Clustering should have valid properties."""
-        cent = tna.centralities(model, measures=['Clustering'])
-        assert all(np.isfinite(cent['Clustering']))
-
-    def test_normalized_centralities(self, model):
-        """Normalized centralities should be in [0, 1] range."""
-        cent = tna.centralities(model, normalize=True)
-        for col in cent.columns:
-            if all(np.isfinite(cent[col])):
-                assert cent[col].min() >= -1e-10, f"{col} min below 0"
-                assert cent[col].max() <= 1.0 + 1e-10, f"{col} max above 1"
-
-    def test_loops_parameter_effect(self, model):
-        """Loops parameter should affect results when self-loops exist."""
-        cent_no_loops = tna.centralities(model, loops=False)
-        cent_with_loops = tna.centralities(model, loops=True)
-        # Both should compute successfully
-        assert len(cent_no_loops) == len(cent_with_loops)
-
-
 class TestAlgorithmEquivalence:
     """Tests for algorithm-level equivalence with R implementations."""
 
     def test_diffusion_algorithm(self):
         """Test diffusion algorithm matches R implementation."""
-        # Simple test matrix
         mat = np.array([
             [0.0, 0.5, 0.5],
             [0.3, 0.0, 0.7],
             [0.4, 0.6, 0.0]
         ])
 
-        # Python implementation
         from tna.centralities import _diffusion
         result = _diffusion(mat)
 
-        # Manual calculation matching R:
-        # s <- 0; p <- diag(1,n,n)
-        # for (i in 1:n) { p <- p %*% mat; s <- s + p }
-        # .rowSums(s, n, n)
         n = 3
         s = np.zeros((n, n))
         p = np.eye(n)
@@ -361,18 +419,15 @@ class TestAlgorithmEquivalence:
 
     def test_clustering_algorithm(self):
         """Test clustering algorithm matches R wcc implementation."""
-        # Simple test matrix
         mat = np.array([
             [0.0, 0.5, 0.5],
             [0.3, 0.0, 0.7],
             [0.4, 0.6, 0.0]
         ])
 
-        # Python implementation
         from tna.centralities import _clustering
         result = _clustering(mat)
 
-        # Manual calculation matching R wcc(x + t(x)):
         sym = mat + mat.T
         np.fill_diagonal(sym, 0)
         num = np.diag(sym @ sym @ sym)
@@ -385,7 +440,6 @@ class TestAlgorithmEquivalence:
 
     def test_betweenness_rsp_algorithm(self):
         """Test RSP betweenness algorithm matches R implementation."""
-        # Test with a fully connected matrix (no zero rows)
         mat = np.array([
             [0.1, 0.5, 0.4],
             [0.3, 0.2, 0.5],
@@ -395,7 +449,6 @@ class TestAlgorithmEquivalence:
         from tna.centralities import _betweenness_rsp
         result = _betweenness_rsp(mat, beta=0.01)
 
-        # Result should be finite and non-negative
         assert all(np.isfinite(result))
         assert all(result >= 0)
 
@@ -404,7 +457,6 @@ class TestAlgorithmEquivalence:
         np.random.seed(42)
         n = 10
         mat = np.random.rand(n, n)
-        # Make row-stochastic
         mat = mat / mat.sum(axis=1, keepdims=True)
         np.fill_diagonal(mat, 0)
         mat = mat / mat.sum(axis=1, keepdims=True)
@@ -412,7 +464,6 @@ class TestAlgorithmEquivalence:
         from tna.centralities import _diffusion
         result = _diffusion(mat)
 
-        # Manually compute expected
         s = np.zeros((n, n))
         p = np.eye(n)
         for _ in range(n):
@@ -429,19 +480,14 @@ class TestDataConsistency:
     def test_group_regulation_dimensions(self):
         """Group regulation data should have correct dimensions."""
         df = tna.load_group_regulation()
-        assert df.shape[0] == 2000  # 2000 sequences
-        # Number of time steps may vary, but should be reasonable
-        assert df.shape[1] >= 10  # At least 10 time steps
+        assert df.shape[0] == 2000
+        assert df.shape[1] >= 10
 
     def test_group_regulation_states(self):
         """Group regulation data should have correct states."""
         df = tna.load_group_regulation()
-        expected_states = {
-            'adapt', 'cohesion', 'consensus', 'coregulate',
-            'discuss', 'emotion', 'monitor', 'plan', 'synthesis'
-        }
         actual_states = set(df.stack().dropna().unique())
-        assert actual_states == expected_states
+        assert actual_states == set(STATES)
 
     def test_group_regulation_long_format(self):
         """Long format data should have correct structure."""
@@ -451,24 +497,16 @@ class TestDataConsistency:
         assert 'Time' in df.columns
 
     def test_model_from_wide_and_long_consistency(self):
-        """Models from wide and long format should be similar."""
-        # This is a structural test - actual values may differ due to
-        # session detection in long format
+        """Models from wide and long format should have same states."""
         df_wide = tna.load_group_regulation()
         df_long = tna.load_group_regulation_long()
 
         model_wide = tna.tna(df_wide)
-
-        # Prepare long format and build model
         prepared = tna.prepare_data(
-            df_long,
-            actor='Actor',
-            time='Time',
-            action='Action'
+            df_long, actor='Actor', time='Time', action='Action'
         )
         model_long = tna.tna(prepared)
 
-        # Both should have same states
         assert set(model_wide.labels) == set(model_long.labels)
 
 
@@ -501,10 +539,7 @@ class TestScalingEquivalence:
     def test_rank_scaling(self, test_matrix):
         """Rank scaling should produce rank-based values."""
         scaled = tna.rank_scale(test_matrix)
-        # Rank scaling produces ranks, not normalized values
-        # Values should be non-negative
         assert scaled.min() >= 0.0
-        # All values should be finite
         assert np.all(np.isfinite(scaled))
 
 
@@ -520,14 +555,13 @@ class TestInitialProbabilities:
     def test_initial_probs_match_first_states(self):
         """Initial probs should reflect first state frequencies."""
         df = pd.DataFrame({
-            'T1': ['A', 'A', 'B', 'C'],  # A appears 2x, B 1x, C 1x
+            'T1': ['A', 'A', 'B', 'C'],
             'T2': ['B', 'C', 'A', 'A'],
         })
         model = tna.tna(df)
 
-        # Get initial prob for A
         a_idx = model.labels.index('A')
-        assert abs(model.inits[a_idx] - 0.5) < 1e-10  # 2/4 = 0.5
+        assert abs(model.inits[a_idx] - 0.5) < 1e-10
 
 
 if __name__ == '__main__':

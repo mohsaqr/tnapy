@@ -147,8 +147,8 @@ def _in_strength(weights: np.ndarray) -> np.ndarray:
 def _closeness_in(G: nx.DiGraph, n: int) -> np.ndarray:
     """Compute incoming closeness centrality.
 
-    R equivalent: igraph::closeness(g, mode = "in")
-    igraph uses: (n-1) / sum(distances_to_node)
+    R equivalent: igraph::closeness(g, mode = "in", normalized = FALSE)
+    igraph default (normalized=FALSE): 1 / sum(distances_to_node)
     """
     result = np.zeros(n)
     # Reverse graph to compute paths TO each node
@@ -161,9 +161,8 @@ def _closeness_in(G: nx.DiGraph, n: int) -> np.ndarray:
             )
             # Sum of distances from all reachable nodes
             total_dist = sum(d for j, d in lengths.items() if j != i)
-            n_reachable = len([j for j in lengths if j != i])
             if total_dist > 0:
-                result[i] = n_reachable / total_dist
+                result[i] = 1.0 / total_dist
         except (nx.NetworkXError, nx.NodeNotFound):
             result[i] = 0.0
 
@@ -173,7 +172,8 @@ def _closeness_in(G: nx.DiGraph, n: int) -> np.ndarray:
 def _closeness_out(G: nx.DiGraph, n: int) -> np.ndarray:
     """Compute outgoing closeness centrality.
 
-    R equivalent: igraph::closeness(g, mode = "out")
+    R equivalent: igraph::closeness(g, mode = "out", normalized = FALSE)
+    igraph default (normalized=FALSE): 1 / sum(distances_from_node)
     """
     result = np.zeros(n)
 
@@ -183,9 +183,8 @@ def _closeness_out(G: nx.DiGraph, n: int) -> np.ndarray:
                 G, i, weight=lambda u, v, d: 1.0 / d['weight']
             )
             total_dist = sum(d for j, d in lengths.items() if j != i)
-            n_reachable = len([j for j in lengths if j != i])
             if total_dist > 0:
-                result[i] = n_reachable / total_dist
+                result[i] = 1.0 / total_dist
         except (nx.NetworkXError, nx.NodeNotFound):
             result[i] = 0.0
 
@@ -195,13 +194,25 @@ def _closeness_out(G: nx.DiGraph, n: int) -> np.ndarray:
 def _closeness_all(G: nx.DiGraph, n: int) -> np.ndarray:
     """Compute overall closeness centrality (mode = "all").
 
-    R equivalent: igraph::closeness(g, mode = "all")
-    Treats graph as undirected for distance calculation.
+    R equivalent: igraph::closeness(g, mode = "all", normalized = FALSE)
+    Treats graph as undirected: for each edge pair (u,v), uses the
+    maximum weight (minimum distance) from either direction, matching
+    igraph's mode="all" behavior.
     """
     result = np.zeros(n)
 
-    # Create undirected version
-    U = G.to_undirected()
+    # Create undirected version with max weight per edge pair
+    # igraph mode="all" allows traversal in both directions, so the
+    # effective weight between (u,v) is max(w(u,v), w(v,u))
+    U = nx.Graph()
+    U.add_nodes_from(range(n))
+    for u, v, data in G.edges(data=True):
+        w = data['weight']
+        if U.has_edge(u, v):
+            if w > U[u][v]['weight']:
+                U[u][v]['weight'] = w
+        else:
+            U.add_edge(u, v, weight=w)
 
     for i in range(n):
         try:
@@ -209,9 +220,8 @@ def _closeness_all(G: nx.DiGraph, n: int) -> np.ndarray:
                 U, i, weight=lambda u, v, d: 1.0 / d['weight']
             )
             total_dist = sum(d for j, d in lengths.items() if j != i)
-            n_reachable = len([j for j in lengths if j != i])
             if total_dist > 0:
-                result[i] = n_reachable / total_dist
+                result[i] = 1.0 / total_dist
         except (nx.NetworkXError, nx.NodeNotFound):
             result[i] = 0.0
 

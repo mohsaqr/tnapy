@@ -335,8 +335,8 @@ class TestBootstrapEdgeCases:
             'T2': ['B', 'A'],
         })
 
-        boot = tna.bootstrap_tna(df, n_boot=10, seed=42)
-        assert boot.n_boot == 10
+        boot = tna.bootstrap_tna(df, iter=10, seed=42)
+        assert boot.iter == 10
 
     def test_bootstrap_single_sequence(self):
         """Bootstrap with single sequence."""
@@ -346,9 +346,9 @@ class TestBootstrapEdgeCases:
             'T3': ['C'],
         })
 
-        boot = tna.bootstrap_tna(df, n_boot=10, seed=42)
+        boot = tna.bootstrap_tna(df, iter=10, seed=42)
         # Should work but CI will be very wide
-        assert boot.estimate is not None
+        assert boot.weights_orig is not None
 
 
 class TestPermutationEdgeCases:
@@ -360,34 +360,32 @@ class TestPermutationEdgeCases:
 
         result = tna.permutation_test(
             df, df,  # Same data
-            n_perm=50,
-            statistic='weights',
+            iter=50,
             seed=42
         )
 
-        # Observed difference should be 0 or very small
-        assert result.observed < 1e-10
+        # All true differences should be 0 for identical groups
+        assert np.allclose(result.edges['diffs_true'], 0, atol=1e-10)
 
     def test_permutation_small_groups(self):
         """Permutation test with very small groups."""
         df1 = pd.DataFrame({
-            'T1': ['A', 'B'],
-            'T2': ['B', 'A'],
+            'T1': ['A', 'B', 'A'],
+            'T2': ['B', 'A', 'B'],
         })
         df2 = pd.DataFrame({
-            'T1': ['A', 'C'],
-            'T2': ['C', 'A'],
+            'T1': ['B', 'A', 'B'],
+            'T2': ['A', 'B', 'A'],
         })
 
         result = tna.permutation_test(
             df1, df2,
-            n_perm=20,
-            statistic='weights',
+            iter=20,
             seed=42
         )
 
         # Should compute without error
-        assert 0 <= result.p_value <= 1
+        assert result.edges is not None
 
 
 class TestModelTypes:
