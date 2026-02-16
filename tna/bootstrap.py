@@ -1412,6 +1412,338 @@ def plot_network_ci(
 
 
 # -----------------------------------------------------------------------------
+# Centrality Stability (case-dropping bootstrap)
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class CentralityStabilityResult:
+    """Result of centrality stability analysis (case-dropping bootstrap).
+
+    Matches R TNA's estimate_centrality_stability output.
+
+    Attributes
+    ----------
+    cs_coefficients : dict[str, float]
+        CS coefficient per measure: max drop_prop where >=certainty
+        of correlations stay above threshold.
+    correlations : dict[str, np.ndarray]
+        Per-measure correlation matrix of shape (iter, n_drop_props).
+    drop_prop : list[float]
+        Drop proportions tested.
+    threshold : float
+        Correlation threshold used (default 0.7).
+    certainty : float
+        Required proportion of correlations above threshold (default 0.95).
+    """
+
+    cs_coefficients: dict[str, float]
+    correlations: dict[str, np.ndarray]
+    drop_prop: list[float]
+    threshold: float = 0.7
+    certainty: float = 0.95
+
+
+def _calculate_cs(
+    correlations: np.ndarray,
+    drop_prop: list[float],
+    threshold: float,
+    certainty: float,
+) -> float:
+    """Calculate CS coefficient from correlation matrix.
+
+    CS = max drop_prop where mean(corr >= threshold) >= certainty.
+    If no drop proportion meets the criterion, returns 0.0.
+
+    Parameters
+    ----------
+    correlations : np.ndarray
+        Shape (iter, n_drop_props) — correlations for one measure.
+    drop_prop : list[float]
+        Drop proportions corresponding to columns of correlations.
+    threshold : float
+        Minimum acceptable correlation.
+    certainty : float
+        Required fraction of iterations exceeding threshold.
+
+    Returns
+    -------
+    float
+        CS coefficient in [0, max(drop_prop)] or 0.0.
+    """
+    # R: valid_indices <- which(prop_above >= certainty)
+    #    ifelse_(length(valid_indices) > 0, drop_prop[max(valid_indices)], 0)
+    prop_above = np.array([
+        np.mean(correlations[:, j] >= threshold, where=~np.isnan(correlations[:, j]))
+        if not np.all(np.isnan(correlations[:, j]))
+        else 0.0
+        for j in range(len(drop_prop))
+    ])
+    valid_indices = np.where(prop_above >= certainty)[0]
+    if len(valid_indices) > 0:
+        return drop_prop[valid_indices[-1]]
+    return 0.0
+
+
+def estimate_cs(
+    x: 'TNA',
+    loops: bool = False,
+    normalize: bool = False,
+    measures: list[str] | None = None,
+    iter: int = 1000,
+    method: str = 'pearson',
+    drop_prop: list[float] | None = None,
+    threshold: float = 0.7,
+    certainty: float = 0.95,
+    seed: int | None = None,
+) -> CentralityStabilityResult | dict[str, 'CentralityStabilityResult']:
+    """Estimate centrality stability using case-dropping bootstrap.
+
+    For each drop proportion, repeatedly drops that fraction of sequences
+    (WITHOUT replacement), recomputes centralities, and correlates with the
+    original. The CS coefficient is the maximum drop proportion where at
+    least ``certainty`` of correlations stay above ``threshold``.
+
+    Matches R TNA's ``estimate_centrality_stability()`` / ``estimate_cs()``.
+
+    Parameters
+    ----------
+    x : TNA or GroupTNA
+        A TNA model (must have sequence data).
+    loops : bool
+        Include self-loops in centrality computation.
+    normalize : bool
+        Normalize centrality measures.
+    measures : list of str, optional
+        Centrality measures to evaluate.
+        Default: ['InStrength', 'OutStrength', 'Betweenness'].
+    iter : int
+        Number of bootstrap iterations per drop proportion (default 1000).
+    method : str
+        Correlation method: 'pearson' or 'spearman'.
+    drop_prop : list of float, optional
+        Proportions of sequences to drop.
+        Default: [0.1, 0.2, ..., 0.9].
+    threshold : float
+        Correlation threshold (default 0.7).
+    certainty : float
+        Required proportion of correlations above threshold (default 0.95).
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    CentralityStabilityResult or dict
+        For a single TNA: CentralityStabilityResult.
+        For GroupTNA: dict mapping group name to CentralityStabilityResult.
+
+    Examples
+    --------
+    >>> import tna
+    >>> df = tna.load_group_regulation()
+    >>> model = tna.tna(df)
+    >>> cs = tna.estimate_cs(model, iter=500, seed=42)
+    >>> print(cs.cs_coefficients)
+    """
+    from .group import _is_group_tna
+    if _is_group_tna(x):
+        return {
+            name: estimate_cs(
+                m, loops=loops, normalize=normalize, measures=measures,
+                iter=iter, method=method, drop_prop=drop_prop,
+                threshold=threshold, certainty=certainty, seed=seed,
+            )
+            for name, m in x.items()
+        }
+
+    if x.data is None:
+        raise ValueError("TNA model must have sequence data for centrality stability")
+
+    if measures is None:
+        measures = ['InStrength', 'OutStrength', 'Betweenness']
+
+    if drop_prop is None:
+        drop_prop = [round(p * 0.1, 1) for p in range(1, 10)]  # 0.1 to 0.9
+
+    seq_data = x.data
+    labels = x.labels
+    model_type = x.type_
+    model_scaling = x.scaling if x.scaling else None
+    n = seq_data.shape[0]
+
+    rng = np.random.default_rng(seed)
+
+    # Compute per-sequence 3D transitions
+    trans = compute_transitions_3d(seq_data, labels, type_=model_type)
+
+    # Compute original centralities
+    orig_cent = compute_centralities(
+        x, measures=measures, loops=loops, normalize=normalize
+    )
+
+    # Filter out zero-SD measures (constant across states)
+    valid_measures = []
+    for m in measures:
+        if orig_cent[m].std() > 0:
+            valid_measures.append(m)
+
+    if not valid_measures:
+        return CentralityStabilityResult(
+            cs_coefficients={m: 0.0 for m in measures},
+            correlations={m: np.zeros((iter, len(drop_prop))) for m in measures},
+            drop_prop=drop_prop,
+            threshold=threshold,
+            certainty=certainty,
+        )
+
+    # Correlation function
+    if method == 'spearman':
+        from scipy.stats import spearmanr
+        def _corr(a, b):
+            if len(a) < 3:
+                return np.nan
+            r, _ = spearmanr(a, b)
+            return r
+    else:
+        def _corr(a, b):
+            # R: cor(x, y, method="pearson", use="complete.obs")
+            # Returns NA when sd is 0
+            if len(a) < 2 or np.std(a, ddof=1) == 0 or np.std(b, ddof=1) == 0:
+                return np.nan
+            return np.corrcoef(a, b)[0, 1]
+
+    # Case-dropping bootstrap
+    correlations = {m: np.zeros((iter, len(drop_prop))) for m in valid_measures}
+
+    for j, dp in enumerate(drop_prop):
+        # R: n_drop <- floor(n * prop); keep <- sample(n_seq, n - n_drop)
+        n_drop = int(np.floor(n * dp))
+        n_keep = n - n_drop
+        if n_drop == 0:
+            # R skips with warning when no cases are dropped
+            for m in valid_measures:
+                correlations[m][:, j] = np.nan
+            continue
+        for i in range(iter):
+            keep_idx = rng.choice(n, size=n_keep, replace=False)
+            trans_sub = trans[keep_idx]
+            weights_sub = compute_weights_from_3d(
+                trans_sub, type_=model_type, scaling=model_scaling
+            )
+            sub_model = TNA(
+                weights=weights_sub,
+                inits=x.inits.copy(),
+                labels=list(labels),
+                type_=model_type,
+            )
+            sub_cent = compute_centralities(
+                sub_model, measures=valid_measures, loops=loops, normalize=normalize
+            )
+            for m in valid_measures:
+                correlations[m][i, j] = _corr(
+                    orig_cent[m].values, sub_cent[m].values
+                )
+
+    # Calculate CS coefficients
+    cs_coefficients = {}
+    for m in measures:
+        if m in valid_measures:
+            cs_coefficients[m] = _calculate_cs(
+                correlations[m], drop_prop, threshold, certainty
+            )
+        else:
+            cs_coefficients[m] = 0.0
+
+    # Add zero-variance measures to correlations dict
+    for m in measures:
+        if m not in valid_measures:
+            correlations[m] = np.full((iter, len(drop_prop)), np.nan)
+
+    return CentralityStabilityResult(
+        cs_coefficients=cs_coefficients,
+        correlations=correlations,
+        drop_prop=drop_prop,
+        threshold=threshold,
+        certainty=certainty,
+    )
+
+
+def plot_cs(
+    result: CentralityStabilityResult,
+    measures: list[str] | None = None,
+    figsize: tuple[float, float] = (10, 6),
+    ax: 'Axes | None' = None,
+    **kwargs,
+) -> 'Axes':
+    """Plot centrality stability results.
+
+    Line plot of mean correlation vs drop proportion per measure,
+    with threshold line and CS coefficient annotations.
+
+    Parameters
+    ----------
+    result : CentralityStabilityResult
+        Result from estimate_cs().
+    measures : list of str, optional
+        Which measures to plot. If None, plots all.
+    figsize : tuple
+        Figure size (used if ax is None).
+    ax : matplotlib Axes, optional
+        Axes to plot on.
+    **kwargs
+        Additional arguments passed to ax.plot().
+
+    Returns
+    -------
+    matplotlib Axes
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError("Plotting requires matplotlib. Install with: pip install matplotlib")
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+
+    if measures is None:
+        measures = list(result.cs_coefficients.keys())
+
+    drop_props = result.drop_prop
+
+    for m in measures:
+        corr_matrix = result.correlations[m]
+        mean_corr = np.nanmean(corr_matrix, axis=0)
+        ax.plot(drop_props, mean_corr, marker='o', label=m, **kwargs)
+
+    # Threshold line
+    ax.axhline(result.threshold, color='red', linestyle='--',
+               alpha=0.7, label=f'Threshold ({result.threshold})')
+
+    # Annotate CS coefficients
+    y_offset = 0.02
+    for i, m in enumerate(measures):
+        cs = result.cs_coefficients[m]
+        ax.annotate(
+            f'CS({m})={cs:.1f}',
+            xy=(0.02, 0.95 - i * 0.06),
+            xycoords='axes fraction',
+            fontsize=9,
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='wheat', alpha=0.5),
+        )
+
+    ax.set_xlabel('Proportion of Cases Dropped', fontweight='bold')
+    ax.set_ylabel('Mean Correlation with Original', fontweight='bold')
+    ax.set_title('Centrality Stability', fontsize=14, fontweight='bold')
+    ax.set_ylim(-0.1, 1.1)
+    ax.set_xlim(min(drop_props) - 0.05, max(drop_props) + 0.05)
+    ax.legend(loc='lower left')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    return ax
+
+
+# -----------------------------------------------------------------------------
 # Module exports
 # -----------------------------------------------------------------------------
 
@@ -1419,12 +1751,16 @@ __all__ = [
     # Result classes
     'BootstrapResult',
     'PermutationResult',
+    'CentralityStabilityResult',
     # Bootstrap functions
     'bootstrap_tna',
     'bootstrap_centralities',
     # Permutation tests
     'permutation_test',
     'permutation_test_edges',
+    # Centrality stability
+    'estimate_cs',
+    'plot_cs',
     # CI methods
     'confidence_interval',
     'bca_ci',

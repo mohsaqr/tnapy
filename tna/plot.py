@@ -1442,3 +1442,520 @@ def plot_communities(
         seed=seed,
         **kwargs
     )
+
+
+def plot_compare(
+    x: 'TNA',
+    y: 'TNA',
+    pos_col: str = '#009900',
+    neg_col: str = 'red',
+    layout: str = 'circular',
+    edge_labels: bool = True,
+    edge_width_range: tuple[float, float] = (0.5, 5.0),
+    show_self_loops: bool = True,
+    self_loop_scale: float = 0.15,
+    curved_edges: bool = True,
+    arrow_size: float = 15,
+    font_size: float = 10,
+    edge_font_size: float = 8,
+    figsize: tuple[float, float] = (10, 10),
+    title: str | None = None,
+    ax: Any | None = None,
+    seed: int | None = 42,
+    **kwargs
+) -> Any:
+    """Plot difference network between two TNA models.
+
+    Draws ``x.weights - y.weights`` as a directed network. Green edges
+    indicate x > y, red edges indicate y > x. Edge width is proportional
+    to the absolute difference. Node fill reflects initial probability
+    differences.
+
+    Parameters
+    ----------
+    x : TNA or GroupTNA
+        First TNA model. For GroupTNA, compares first two groups.
+    y : TNA
+        Second TNA model.
+    pos_col : str
+        Color for edges where x > y (default green).
+    neg_col : str
+        Color for edges where y > x (default red).
+    layout : str
+        Layout algorithm.
+    edge_labels : bool
+        Show absolute difference labels on edges.
+    edge_width_range : tuple
+        Min and max edge widths.
+    show_self_loops : bool
+        Whether to draw self-loop differences.
+    self_loop_scale : float
+        Size of self-loop arcs.
+    curved_edges : bool
+        Use curved edges for bidirectional pairs.
+    arrow_size : float
+        Arrow head size.
+    font_size : float
+        Node label font size.
+    edge_font_size : float
+        Edge label font size.
+    figsize : tuple
+        Figure size.
+    title : str, optional
+        Plot title.
+    ax : matplotlib Axes, optional
+        Axes to plot on.
+    seed : int, optional
+        Random seed for layout.
+    **kwargs
+        Additional arguments.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+
+    Examples
+    --------
+    >>> import tna
+    >>> df = tna.load_group_regulation()
+    >>> m1 = tna.tna(df.iloc[:1000])
+    >>> m2 = tna.tna(df.iloc[1000:])
+    >>> tna.plot_compare(m1, m2)
+    """
+    _check_matplotlib()
+
+    # GroupTNA dispatch: compare first two groups
+    from .group import _is_group_tna
+    if _is_group_tna(x):
+        names = list(x.keys())
+        if len(names) < 2:
+            raise ValueError("GroupTNA must have at least 2 groups for comparison")
+        m1 = x[names[0]]
+        m2 = x[names[1]]
+        default_title = f'{names[0]} vs {names[1]}'
+        return plot_compare(
+            m1, m2, pos_col=pos_col, neg_col=neg_col, layout=layout,
+            edge_labels=edge_labels, edge_width_range=edge_width_range,
+            show_self_loops=show_self_loops, self_loop_scale=self_loop_scale,
+            curved_edges=curved_edges, arrow_size=arrow_size,
+            font_size=font_size, edge_font_size=edge_font_size,
+            figsize=figsize, title=title or default_title, ax=ax, seed=seed,
+            **kwargs,
+        )
+
+    # Validate matching labels
+    if set(x.labels) != set(y.labels):
+        raise ValueError("Both models must have the same state labels")
+
+    # Reorder y to match x label order
+    idx_map = {label: y.labels.index(label) for label in x.labels}
+    y_weights = np.zeros_like(y.weights)
+    y_inits = np.zeros_like(y.inits)
+    for i, li in enumerate(x.labels):
+        y_inits[i] = y.inits[idx_map[li]]
+        for j, lj in enumerate(x.labels):
+            y_weights[i, j] = y.weights[idx_map[li], idx_map[lj]]
+
+    labels = x.labels
+    diff = x.weights - y_weights
+    init_diff = x.inits - y_inits
+    n = len(labels)
+
+    # Build graph from non-zero differences
+    G = nx.DiGraph()
+    G.add_nodes_from(labels)
+    for i in range(n):
+        for j in range(n):
+            if abs(diff[i, j]) > 1e-12:
+                G.add_edge(labels[i], labels[j], weight=diff[i, j])
+
+    pos = _get_layout(G, layout, seed=seed)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    # Node colors: green if init_diff > 0, red if < 0, grey if ~0
+    abs_init = np.abs(init_diff)
+    max_init = abs_init.max() if abs_init.max() > 0 else 1.0
+    node_colors = []
+    for i in range(n):
+        if init_diff[i] > 1e-12:
+            alpha = 0.3 + 0.7 * abs(init_diff[i]) / max_init
+            # Blend green with white
+            from matplotlib.colors import to_rgba
+            base = to_rgba(pos_col)
+            node_colors.append((*base[:3], alpha))
+        elif init_diff[i] < -1e-12:
+            alpha = 0.3 + 0.7 * abs(init_diff[i]) / max_init
+            base = to_rgba(neg_col)
+            node_colors.append((*base[:3], alpha))
+        else:
+            node_colors.append((0.7, 0.7, 0.7, 0.8))
+
+    # Draw nodes
+    node_list = list(G.nodes())
+    xs = [pos[nd][0] for nd in node_list]
+    ys = [pos[nd][1] for nd in node_list]
+    node_size = 1500
+    ax.scatter(
+        xs, ys, s=node_size, c=node_colors,
+        edgecolors='white', linewidths=2, zorder=3,
+    )
+
+    pad = 0.25
+    ax.set_xlim(min(xs) - pad, max(xs) + pad)
+    ax.set_ylim(min(ys) - pad, max(ys) + pad)
+    fig.canvas.draw()
+
+    # Node labels
+    for nd in node_list:
+        x_pos, y_pos = pos[nd]
+        ax.text(x_pos, y_pos, nd, fontsize=font_size, fontweight='bold',
+                ha='center', va='center', zorder=4)
+
+    # Edges
+    edges_to_draw = []
+    edge_weights = []
+    for u, v, data in G.edges(data=True):
+        if not show_self_loops and u == v:
+            continue
+        edges_to_draw.append((u, v))
+        edge_weights.append(data['weight'])
+
+    if edges_to_draw:
+        abs_weights = [abs(w) for w in edge_weights]
+        abs_max = max(abs_weights) if max(abs_weights) > 0 else 1.0
+
+        edge_widths = [
+            edge_width_range[0] + (aw / abs_max) * (edge_width_range[1] - edge_width_range[0])
+            for aw in abs_weights
+        ]
+
+        bidir = _identify_bidirectional_pairs(edges_to_draw)
+        shrink_pts = np.sqrt(node_size) / 2
+        node_radii_data = {nd: _node_radius_approx(node_size, ax) for nd in node_list}
+
+        for idx_e, (u, v) in enumerate(edges_to_draw):
+            w = edge_weights[idx_e]
+            color = pos_col if w > 0 else neg_col
+            width = edge_widths[idx_e]
+
+            if u == v:
+                graph_center = _compute_graph_center(pos)
+                _draw_self_loop(
+                    ax, pos[u], graph_center,
+                    node_radius=node_radii_data[u],
+                    width=width, alpha=0.7, color=color,
+                    arrow_size=arrow_size, loop_scale=self_loop_scale,
+                    zorder=1,
+                )
+            else:
+                if (u, v) in bidir:
+                    rad = 0.2 if u < v else -0.2
+                else:
+                    rad = 0.0
+                if not curved_edges:
+                    rad = 0.0
+
+                _draw_curved_edge(
+                    ax, pos[u], pos[v],
+                    rad=rad, width=width, alpha=0.7, color=color,
+                    arrow_size=arrow_size,
+                    shrink_a=shrink_pts, shrink_b=shrink_pts,
+                    zorder=1,
+                )
+
+        # Edge labels
+        if edge_labels:
+            graph_center = _compute_graph_center(pos)
+            for idx_e, (u, v) in enumerate(edges_to_draw):
+                w = edge_weights[idx_e]
+                if u == v:
+                    nx_pos, ny_pos = pos[u]
+                    cx, cy = graph_center
+                    ddx = nx_pos - cx
+                    ddy = ny_pos - cy
+                    dd = np.hypot(ddx, ddy)
+                    if dd < 1e-9:
+                        ddx, ddy = 0.0, 1.0
+                    else:
+                        ddx, ddy = ddx / dd, ddy / dd
+                    nr = _node_radius_approx(node_size, ax)
+                    loop_r = nr * (0.6 + self_loop_scale * 2)
+                    label_dist = nr + loop_r * 2.3
+                    lx = nx_pos + ddx * label_dist
+                    ly = ny_pos + ddy * label_dist
+                    ax.text(
+                        lx, ly, f'{abs(w):.3f}',
+                        fontsize=edge_font_size,
+                        ha='center', va='center', zorder=5,
+                        bbox=dict(boxstyle='round,pad=0.15',
+                                  facecolor='white', edgecolor='none', alpha=0.8),
+                    )
+                    continue
+
+                x1, y1 = pos[u]
+                x2, y2 = pos[v]
+                mx = x1 + 0.65 * (x2 - x1)
+                my = y1 + 0.65 * (y2 - y1)
+
+                if (u, v) in bidir:
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    length = np.hypot(dx, dy) or 1.0
+                    nx_off = -dy / length
+                    ny_off = dx / length
+                    offset = 0.06 if u < v else -0.06
+                    mx += nx_off * offset
+                    my += ny_off * offset
+
+                ax.text(
+                    mx, my, f'{abs(w):.3f}',
+                    fontsize=edge_font_size,
+                    ha='center', va='center', zorder=5,
+                    bbox=dict(boxstyle='round,pad=0.15',
+                              facecolor='white', edgecolor='none', alpha=0.8),
+                )
+
+    # Legend
+    pos_patch = mpatches.Patch(color=pos_col, label='x > y')
+    neg_patch = mpatches.Patch(color=neg_col, label='y > x')
+    ax.legend(handles=[pos_patch, neg_patch], loc='upper left')
+
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold')
+    else:
+        ax.set_title('Difference Network', fontsize=14, fontweight='bold')
+
+    ax.set_axis_off()
+    ax.margins(0.1)
+
+    return ax
+
+
+def _compute_adjusted_stdres(tab: np.ndarray) -> np.ndarray:
+    """Compute adjusted standardized residuals matching R's chisq.test()$stdres.
+
+    R formula: stdres[i,j] = (O - E) / sqrt(E * (1 - ri/N) * (1 - cj/N))
+    where ri = row sum i, cj = col sum j, N = grand total.
+    """
+    N = tab.sum()
+    if N == 0:
+        return np.zeros_like(tab, dtype=float)
+
+    row_sums = tab.sum(axis=1)
+    col_sums = tab.sum(axis=0)
+    expected = np.outer(row_sums, col_sums) / N
+
+    # Adjusted standardized residual denominator
+    # sqrt(E * (1 - ri/N) * (1 - cj/N))
+    row_prop = row_sums / N
+    col_prop = col_sums / N
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        denom = np.sqrt(
+            expected
+            * (1 - row_prop[:, np.newaxis])
+            * (1 - col_prop[np.newaxis, :])
+        )
+        stdres = (tab - expected) / denom
+    stdres[~np.isfinite(stdres)] = 0.0
+    return stdres
+
+
+def plot_mosaic(
+    model: 'TNA',
+    figsize: tuple[float, float] = (10, 8),
+    title: str | None = None,
+    ax: Any | None = None,
+    cmap: str = 'RdBu',
+    gap: float = 0.02,
+    **kwargs,
+) -> Any:
+    """Plot a mosaic (marimekko) chart of the transition matrix.
+
+    Matches R TNA's ``plot_mosaic()``. Uses ``t(weights)`` as the
+    contingency table (R convention), so X-axis = incoming edges
+    (to-states) and Y-axis = outgoing edges (from-states). Tile colors
+    reflect adjusted standardized residuals from chi-squared test: blue
+    means more transitions than expected, red means fewer.
+
+    Only supported for integer-valued weight matrices (frequency or
+    co-occurrence model types).
+
+    Parameters
+    ----------
+    model : TNA or GroupTNA
+        A TNA model (frequency or co-occurrence type).
+        For GroupTNA, plots the first group.
+    figsize : tuple
+        Figure size.
+    title : str, optional
+        Plot title.
+    ax : matplotlib Axes, optional
+        Axes to plot on.
+    cmap : str
+        Matplotlib colormap for residuals (default 'RdBu').
+    gap : float
+        Gap between tiles as fraction of total width/height.
+    **kwargs
+        Additional arguments.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+
+    Examples
+    --------
+    >>> import tna
+    >>> df = tna.load_group_regulation()
+    >>> model = tna.ftna(df)
+    >>> tna.plot_mosaic(model)
+    """
+    _check_matplotlib()
+    from matplotlib.patches import Rectangle
+    from matplotlib.colors import Normalize
+    import matplotlib.cm as cm
+
+    # GroupTNA dispatch
+    from .group import _is_group_tna
+    if _is_group_tna(model):
+        names = list(model.keys())
+        model = model[names[0]]
+
+    labels = model.labels
+    n = len(labels)
+
+    # R: plot_mosaic_(as.table(t(x$weights)), xlab="Incoming edges", ylab="Outgoing edges")
+    # Transpose: tab[i,j] = weights[j,i]; rows=to-states (incoming), cols=from-states (outgoing)
+    tab = model.weights.T.copy()
+    tab = np.maximum(tab, 0)
+
+    total = tab.sum()
+    if total == 0:
+        raise ValueError("Weight matrix is all zeros, cannot create mosaic plot")
+
+    # Compute adjusted standardized residuals (matching R's chisq.test()$stdres)
+    residuals = _compute_adjusted_stdres(tab)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    # Tile widths proportional to row sums (rows = incoming/to-states after transpose)
+    row_totals = tab.sum(axis=1)
+    total_sum = row_totals.sum()
+    tile_widths = row_totals / total_sum
+
+    # R uses fixed color limits [-4, 4]
+    norm = Normalize(vmin=-4, vmax=4)
+    colormap = cm.get_cmap(cmap)
+
+    # Draw tiles: rows of tab are x-axis, columns are y-axis
+    x_start = 0.0
+    for i in range(n):
+        w = tile_widths[i]
+        if w < 1e-12:
+            x_start += w
+            continue
+
+        row_sum = tab[i, :].sum()
+        if row_sum > 0:
+            col_props = tab[i, :] / row_sum
+        else:
+            col_props = np.zeros(n)
+
+        y_start = 0.0
+        for j in range(n):
+            h = col_props[j]
+            if h < 1e-12:
+                y_start += h
+                continue
+
+            # Small offsets matching R: row_offset, col_offset
+            row_offset = i * n * 0.0025
+            col_offset = j * n * 0.0025
+
+            color = colormap(norm(residuals[i, j]))
+            rect = Rectangle(
+                (x_start + row_offset, y_start + col_offset),
+                w, h,
+                facecolor=color,
+                edgecolor='black',
+                linewidth=0.5,
+            )
+            ax.add_patch(rect)
+
+            # Add value label if tile is large enough
+            if w > 0.04 and h > 0.04:
+                ax.text(
+                    x_start + row_offset + w / 2,
+                    y_start + col_offset + h / 2,
+                    f'{tab[i, j]:.0f}',
+                    ha='center', va='center',
+                    fontsize=7,
+                    color='black' if abs(residuals[i, j]) < 2.5 else 'white',
+                )
+
+            y_start += h
+
+        x_start += w
+
+    # X-axis labels: incoming edges (rows of tab = to-states = labels)
+    x_pos = 0.0
+    x_ticks = []
+    for i in range(n):
+        w = tile_widths[i]
+        if w > 1e-12:
+            x_ticks.append(x_pos + w / 2)
+        x_pos += w
+
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(labels, rotation=90 if n > 3 else 0,
+                       ha='center' if n <= 3 else 'center')
+    ax.xaxis.set_ticks_position('top')
+    ax.xaxis.set_label_position('top')
+    ax.set_xlabel('Incoming edges', fontweight='bold')
+
+    # Y-axis labels: outgoing edges (columns of tab = from-states = labels)
+    # Approximate positions from the first column
+    if tile_widths[0] > 1e-12:
+        first_row_sum = tab[0, :].sum()
+        if first_row_sum > 0:
+            col_props_first = tab[0, :] / first_row_sum
+        else:
+            col_props_first = np.zeros(n)
+        y_pos = 0.0
+        y_ticks = []
+        for j in range(n):
+            h = col_props_first[j]
+            y_ticks.append(y_pos + h / 2)
+            y_pos += h
+        ax.set_yticks(y_ticks)
+        ax.set_yticklabels(labels)
+    ax.set_ylabel('Outgoing edges', fontweight='bold')
+
+    ax.set_xlim(0, x_start + n * n * 0.0025)
+    ax.set_ylim(0, 1.0 + n * n * 0.0025)
+
+    # Remove spines and ticks to match R's theme_classic
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(length=0)
+
+    # Colorbar matching R: limits [-4, 4], breaks at -4, -2, 0, 2, 4
+    sm = cm.ScalarMappable(cmap=colormap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.8, pad=0.02,
+                        ticks=[-4, -2, 0, 2, 4])
+    cbar.set_label('Standardized\nresidual', fontweight='bold')
+
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold')
+
+    return ax

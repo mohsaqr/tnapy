@@ -48,6 +48,8 @@ from .plot import (
     plot_centralities,
     plot_heatmap,
     plot_comparison,
+    plot_compare,
+    plot_mosaic,
     plot_sequences,
     plot_frequencies,
     plot_histogram,
@@ -56,15 +58,18 @@ from .plot import (
 from .bootstrap import (
     BootstrapResult,
     PermutationResult,
+    CentralityStabilityResult,
     bootstrap_tna,
     bootstrap_centralities,
     permutation_test,
     permutation_test_edges,
+    estimate_cs,
     confidence_interval,
     bca_ci,
     plot_bootstrap,
     plot_permutation,
     plot_network_ci,
+    plot_cs,
 )
 
 __version__ = "0.1.0"
@@ -118,6 +123,8 @@ __all__ = [
     "plot_centralities",
     "plot_heatmap",
     "plot_comparison",
+    "plot_compare",
+    "plot_mosaic",
     "plot_sequences",
     "plot_frequencies",
     "plot_histogram",
@@ -125,13 +132,16 @@ __all__ = [
     # Statistical inference (bootstrap)
     "BootstrapResult",
     "PermutationResult",
+    "CentralityStabilityResult",
     "bootstrap_tna",
     "bootstrap_centralities",
     "permutation_test",
     "permutation_test_edges",
+    "estimate_cs",
     "confidence_interval",
     "bca_ci",
     "plot_bootstrap",
     "plot_permutation",
     "plot_network_ci",
+    "plot_cs",
 ]
