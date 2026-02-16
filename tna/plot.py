@@ -110,7 +110,7 @@ def _draw_curved_edge(
     rad: float = 0.0,
     width: float = 1.0,
     alpha: float = 0.7,
-    color: str = '#444444',
+    color: str = '#0000D5',
     arrow_size: float = 15,
     shrink_a: float = 0.0,
     shrink_b: float = 0.0,
@@ -120,7 +120,7 @@ def _draw_curved_edge(
     arrow = mpatches.FancyArrowPatch(
         p1, p2,
         connectionstyle=f"arc3,rad={rad}",
-        arrowstyle=f"->,head_length={arrow_size / 15:.2f},head_width={arrow_size / 22:.2f}",
+        arrowstyle=f"->,head_length={arrow_size / 30:.2f},head_width={arrow_size / 44:.2f}",
         color=color,
         alpha=alpha,
         linewidth=width,
@@ -140,7 +140,7 @@ def _draw_self_loop(
     node_radius: float,
     width: float = 1.0,
     alpha: float = 0.7,
-    color: str = '#444444',
+    color: str = '#0000D5',
     arrow_size: float = 15,
     loop_scale: float = 0.15,
     zorder: int = 1,
@@ -421,7 +421,7 @@ def plot_network(
 
     # Calculate node sizes
     if node_size is None:
-        sizes = [1500] * len(G.nodes())
+        sizes = [5000] * len(G.nodes())
     elif isinstance(node_size, (int, float)):
         sizes = [float(node_size)] * len(G.nodes())
     else:
@@ -472,8 +472,8 @@ def plot_network(
         xs, ys,
         s=sizes,
         c=node_colors,
-        edgecolors='white',
-        linewidths=2,
+        edgecolors='black',
+        linewidths=1,
         zorder=3,
     )
 
@@ -536,7 +536,7 @@ def plot_network(
                 rad=rad,
                 width=w,
                 alpha=a,
-                color='#444444',
+                color='#0000D5',
                 arrow_size=arrow_size,
                 shrink_a=node_shrink_pts[u],
                 shrink_b=node_shrink_pts[v],
@@ -552,7 +552,7 @@ def plot_network(
                     node_radius=node_radii_data[u],
                     width=w,
                     alpha=a,
-                    color='#444444',
+                    color='#0000D5',
                     arrow_size=arrow_size,
                     loop_scale=self_loop_scale,
                     zorder=1,
