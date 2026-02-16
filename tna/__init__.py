@@ -28,7 +28,7 @@ Example
 """
 
 from .model import TNA, build_model, tna, ftna, ctna, atna
-from .prepare import TNAData, prepare_data, create_seqdata
+from .prepare import TNAData, prepare_data, create_seqdata, import_onehot
 from .centralities import centralities, betweenness_network, AVAILABLE_MEASURES
 from .prune import prune
 from .cliques import cliques, CliqueResult
@@ -41,6 +41,7 @@ from .utils import (
     rank_scale,
     apply_scaling,
 )
+from .cluster import cluster_sequences, ClusterResult
 from .data import load_group_regulation, load_group_regulation_long
 from .colors import color_palette, DEFAULT_COLORS, create_color_map
 from .plot import (
@@ -87,6 +88,10 @@ __all__ = [
     "TNAData",
     "prepare_data",
     "create_seqdata",
+    "import_onehot",
+    # Clustering
+    "cluster_sequences",
+    "ClusterResult",
     # Centralities
     "centralities",
     "betweenness_network",

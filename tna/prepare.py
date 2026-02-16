@@ -355,3 +355,132 @@ def create_seqdata(
         col_names = col_names + ['end']
 
     return data, state_labels, col_names
+
+
+def import_onehot(
+    data: pd.DataFrame,
+    cols: list[str],
+    actor: str | None = None,
+    session: str | None = None,
+    window_size: int = 1,
+    window_type: str = "tumbling",
+    aggregate: bool = False,
+) -> pd.DataFrame:
+    """Convert one-hot encoded data into wide-format sequence data.
+
+    Matches the R TNA ``import_onehot`` output format: one row per
+    actor/session group with columns named ``W{window}_T{slot}``.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Input data with one-hot encoded columns (0/1 values).
+    cols : list of str
+        Column names that are one-hot encoded state indicators.
+    actor : str, optional
+        Column name identifying actors/users. Windowing is done within actors.
+    session : str, optional
+        Column name identifying sessions. Windowing is done within sessions.
+    window_size : int
+        Number of rows per window (default: 1).
+    window_type : str
+        ``'tumbling'`` (non-overlapping) or ``'sliding'`` (step-by-1).
+    aggregate : bool
+        If ``True`` (tumbling only), keep only the first non-NA value per
+        column within each window instead of expanding all rows.
+
+    Returns
+    -------
+    pd.DataFrame
+        Wide-format DataFrame with one row per group and columns
+        ``W{window}_T{slot}``, compatible with ``tna()``.
+    """
+    # Validate columns exist
+    missing = [c for c in cols if c not in data.columns]
+    if missing:
+        raise ValueError(f"Columns not found in data: {missing}")
+
+    # Validate 0/1 values
+    oh = data[cols]
+    unique_vals = set(oh.values.flatten())
+    valid = {0, 1, 0.0, 1.0}
+    non_valid = unique_vals - valid - {np.nan}
+    if non_valid:
+        raise ValueError(
+            f"One-hot columns must contain only 0 and 1, found: {non_valid}"
+        )
+
+    if window_type not in ("tumbling", "sliding"):
+        raise ValueError(
+            f"Unknown window_type {window_type!r}. "
+            "Choose 'tumbling' or 'sliding'."
+        )
+
+    # Decode: 1 → column name, 0 → None
+    decoded = data.copy()
+    for col in cols:
+        decoded[col] = decoded[col].apply(lambda x, c=col: c if x == 1 else None)
+
+    # Determine groups
+    group_cols: list[str] = []
+    if actor is not None:
+        group_cols.append(actor)
+    if session is not None:
+        group_cols.append(session)
+
+    if group_cols:
+        groups = decoded.groupby(group_cols, sort=False)
+    else:
+        groups = [(None, decoded)]
+
+    # Process each group into one flattened row
+    group_rows: list[dict] = []
+
+    for _, group_df in groups:
+        group_df = group_df.reset_index(drop=True)
+        n_rows = len(group_df)
+
+        # Generate window boundaries
+        if window_type == "tumbling":
+            windows = [
+                (start, min(start + window_size, n_rows))
+                for start in range(0, n_rows, window_size)
+            ]
+        else:  # sliding
+            n_windows = max(1, n_rows - window_size + 1)
+            windows = [
+                (start, min(start + window_size, n_rows))
+                for start in range(n_windows)
+            ]
+
+        row_dict: dict = {}
+
+        for w_idx, (start, end) in enumerate(windows):
+            window_df = group_df.iloc[start:end]
+
+            # Sliding windows and aggregate=True always collapse:
+            # one slot per column (first non-NA value)
+            if window_type == "sliding" or aggregate:
+                t = 1
+                for col in cols:
+                    first_val = None
+                    for _, r in window_df.iterrows():
+                        if pd.notna(r[col]):
+                            first_val = r[col]
+                            break
+                    row_dict[f"W{w_idx}_T{t}"] = first_val
+                    t += 1
+            else:
+                # Tumbling without aggregate: expand all rows × cols
+                t = 1
+                for _, r in window_df.iterrows():
+                    for col in cols:
+                        row_dict[f"W{w_idx}_T{t}"] = r[col]
+                        t += 1
+
+        group_rows.append(row_dict)
+
+    if not group_rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(group_rows)
