@@ -1,0 +1,61 @@
+{
+  "name": "tna",
+  "version": "0.1.0",
+  "description": "Transition Network Analysis for JavaScript/TypeScript",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.cjs"
+    },
+    "./analysis": {
+      "types": "./dist/analysis/index.d.ts",
+      "import": "./dist/analysis/index.js",
+      "require": "./dist/analysis/index.cjs"
+    },
+    "./stats": {
+      "types": "./dist/stats/index.d.ts",
+      "import": "./dist/stats/index.js",
+      "require": "./dist/stats/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "NODE_OPTIONS='--max-old-space-size=4096' vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "transition-network-analysis",
+    "tna",
+    "network-analysis",
+    "sequential-data",
+    "graph-analysis",
+    "centrality",
+    "clustering"
+  ],
+  "author": "Mohammed Saqr",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {}
+}
