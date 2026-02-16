@@ -14,6 +14,7 @@ tna/                    # Main package
   cliques.py            # cliques(), CliqueResult
   communities.py        # communities(), CommunityResult
   group.py              # GroupTNA, group_tna(), group_ftna(), group_ctna(), group_atna()
+  compare.py            # compare_sequences()
   bootstrap.py          # bootstrap_tna(), permutation_test(), BootstrapResult, PermutationResult
   plot.py               # plot_network(), plot_centralities(), plot_heatmap(), plot_comparison(),
                         #   plot_sequences(), plot_frequencies(), plot_histogram(), plot_communities()

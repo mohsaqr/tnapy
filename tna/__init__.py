@@ -42,6 +42,7 @@ from .utils import (
     apply_scaling,
 )
 from .cluster import cluster_sequences, ClusterResult
+from .compare import compare_sequences
 from .data import load_group_regulation, load_group_regulation_long
 from .colors import color_palette, DEFAULT_COLORS, create_color_map
 from .plot import (
@@ -92,6 +93,8 @@ __all__ = [
     # Clustering
     "cluster_sequences",
     "ClusterResult",
+    # Sequence comparison
+    "compare_sequences",
     # Centralities
     "centralities",
     "betweenness_network",
