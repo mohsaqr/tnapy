@@ -278,18 +278,22 @@ def plot_network(
     layout: str = "circular",
     node_size: str | float | None = None,
     node_size_range: tuple[float, float] = (800, 3000),
+    vsize: float = 1400,
     edge_labels: bool = True,
     edge_threshold: float | None = None,
     minimum: float | None = None,
     cut: float | None = None,
+    edge_color: str = '#0000D5',
     edge_width_range: tuple[float, float] = (0.5, 5.0),
+    border_color: str = 'black',
+    border_width: float = 1,
     show_self_loops: bool = True,
     self_loop_scale: float = 0.15,
     curved_edges: bool = True,
     arrow_size: float = 15,
     font_size: float = 10,
     edge_font_size: float = 8,
-    figsize: tuple[float, float] = (10, 10),
+    figsize: tuple[float, float] = (6, 6),
     title: str | None = None,
     ax: Any | None = None,
     seed: int | None = 42,
@@ -311,10 +315,13 @@ def plot_network(
     node_size : str or float, optional
         If str, name of centrality measure to scale nodes by
         ('OutStrength', 'InStrength', 'Betweenness', etc.).
-        If float, fixed size for all nodes.
-        If None, uses default size (1500).
+        If float, overrides vsize with a fixed size for all nodes.
+        If None, uses vsize.
     node_size_range : tuple
         Min and max node sizes when scaling by centrality
+    vsize : float
+        Default node size in scatter points (default 1400).
+        Ignored when node_size is a str or float.
     edge_labels : bool
         Whether to show edge weight labels
     edge_threshold : float, optional
@@ -325,8 +332,14 @@ def plot_network(
     cut : float, optional
         Fade edges below this weight (reduced alpha ~0.15) but still show them.
         Edges above this value are drawn normally.
+    edge_color : str
+        Color for edges (default '#0000D5', qgraph blue).
     edge_width_range : tuple
         Min and max edge widths
+    border_color : str
+        Node border color (default 'black').
+    border_width : float
+        Node border line width (default 1).
     show_self_loops : bool
         Whether to show self-loops
     self_loop_scale : float
@@ -380,8 +393,11 @@ def plot_network(
             plot_network(
                 m, labels=labels, colors=colors, layout=layout,
                 node_size=node_size, node_size_range=node_size_range,
-                edge_labels=edge_labels, edge_threshold=edge_threshold,
-                minimum=minimum, cut=cut, edge_width_range=edge_width_range,
+                vsize=vsize, edge_labels=edge_labels,
+                edge_threshold=edge_threshold,
+                minimum=minimum, cut=cut, edge_color=edge_color,
+                edge_width_range=edge_width_range,
+                border_color=border_color, border_width=border_width,
                 show_self_loops=show_self_loops, self_loop_scale=self_loop_scale,
                 curved_edges=curved_edges, arrow_size=arrow_size,
                 font_size=font_size, edge_font_size=edge_font_size,
@@ -421,7 +437,7 @@ def plot_network(
 
     # Calculate node sizes
     if node_size is None:
-        sizes = [5000] * len(G.nodes())
+        sizes = [vsize] * len(G.nodes())
     elif isinstance(node_size, (int, float)):
         sizes = [float(node_size)] * len(G.nodes())
     else:
@@ -472,13 +488,13 @@ def plot_network(
         xs, ys,
         s=sizes,
         c=node_colors,
-        edgecolors='black',
-        linewidths=1,
+        edgecolors=border_color,
+        linewidths=border_width,
         zorder=3,
     )
 
     # Force axis limits before computing radii (scatter auto-scales)
-    pad = 0.25
+    pad = 0.45
     ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
     fig.canvas.draw()  # flush layout so axis positions are valid
@@ -536,7 +552,7 @@ def plot_network(
                 rad=rad,
                 width=w,
                 alpha=a,
-                color='#0000D5',
+                color=edge_color,
                 arrow_size=arrow_size,
                 shrink_a=node_shrink_pts[u],
                 shrink_b=node_shrink_pts[v],
@@ -552,7 +568,7 @@ def plot_network(
                     node_radius=node_radii_data[u],
                     width=w,
                     alpha=a,
-                    color='#0000D5',
+                    color=edge_color,
                     arrow_size=arrow_size,
                     loop_scale=self_loop_scale,
                     zorder=1,
@@ -1598,10 +1614,10 @@ def plot_compare(
     node_list = list(G.nodes())
     xs = [pos[nd][0] for nd in node_list]
     ys = [pos[nd][1] for nd in node_list]
-    node_size = 1500
+    node_size = 2000
     ax.scatter(
         xs, ys, s=node_size, c=node_colors,
-        edgecolors='white', linewidths=2, zorder=3,
+        edgecolors='black', linewidths=1, zorder=3,
     )
 
     pad = 0.25
