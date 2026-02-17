@@ -12,7 +12,12 @@ A Python package providing **exact numerical equivalence** to the [R TNA package
 
 ## Installation
 
+
+
 ```bash
+# Latest stable version
+pip install tnapy
+
 # Development installation
 pip install -e .
 
@@ -43,6 +48,46 @@ tna.plot_network(model, layout='circular', edge_threshold=0.05)
 # Visualize centralities
 tna.plot_centralities(cent, measures=['OutStrength', 'InStrength', 'Betweenness'])
 ```
+
+**Output:**
+```
+TNA Model
+  Type: relative
+  States: ['adapt', 'cohesion', 'consensus', 'coregulate', 'discuss', 'emotion', 'monitor', 'plan', 'synthesis']
+  Scaling: none
+
+Transition Matrix:
+               adapt  cohesion  consensus  coregulate   discuss   emotion   monitor      plan  synthesis
+adapt       0.000000  0.273084   0.477407    0.021611  0.058939  0.119843  0.033399  0.015717   0.000000
+cohesion    0.002950  0.027139   0.497935    0.119174  0.059587  0.115634  0.033038  0.141003   0.003540
+consensus   0.004740  0.014852   0.082003    0.187707  0.188023  0.072681  0.046611  0.395797   0.007584
+coregulate  0.016244  0.036041   0.134518    0.023350  0.273604  0.172081  0.086294  0.239086   0.018782
+discuss     0.071374  0.047583   0.321185    0.084282  0.194887  0.105796  0.022273  0.011643   0.140977
+emotion     0.002467  0.325344   0.320409    0.034191  0.101868  0.076842  0.036306  0.099753   0.002820
+monitor     0.011165  0.055827   0.159107    0.057920  0.375436  0.090719  0.018144  0.215632   0.016050
+plan        0.000975  0.025175   0.290401    0.017216  0.067890  0.146825  0.075524  0.374208   0.001787
+synthesis   0.234663  0.033742   0.466258    0.044479  0.062883  0.070552  0.012270  0.075153   0.000000
+
+Centralities:
+            OutStrength  InStrength  ClosenessIn  ClosenessOut  Closeness  Betweenness  BetweennessRSP  Diffusion  Clustering
+adapt          1.000000    0.344578     0.131494      0.142857   0.142857          0.0        0.029498   5.586292    0.336984
+cohesion       0.972861    0.811648     0.137931      0.142857   0.142857          0.0        0.072174   5.208633    0.299649
+consensus      0.917997    2.667219     0.142857      0.137931   0.142857          0.0        0.082498   4.659728    0.160777
+coregulate     0.976650    0.566581     0.133333      0.142857   0.142857          0.0        0.062987   5.147938    0.305784
+discuss        0.805113    1.188232     0.138889      0.138889   0.142857          0.0        0.089174   4.627577    0.239711
+emotion        0.923158    0.894131     0.136986      0.142857   0.142857          0.0        0.070595   5.069888    0.290479
+monitor        0.981856    0.345715     0.131868      0.142857   0.142857          0.0        0.044498   5.156837    0.288882
+plan           0.625792    1.193784     0.142857      0.133333   0.142857          0.0        0.094078   3.487529    0.287490
+synthesis      1.000000    0.191539     0.126984      0.142857   0.142857          0.0        0.024055   5.582502    0.358614
+```
+
+**Network Plot:**
+
+![Network Plot](https://raw.githubusercontent.com/mohsaqr/tnapy/main/images/network.png)
+
+**Centralities Plot:**
+
+![Centralities Plot](https://raw.githubusercontent.com/mohsaqr/tnapy/main/images/centralities.png)
 
 ## Model Building
 

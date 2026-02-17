@@ -96,6 +96,10 @@ Thumbs.db
 *.jpeg
 *.gif
 
+# But keep README images
+!images/
+!images/*
+
 # R artifacts
 .Rhistory
 .RData
