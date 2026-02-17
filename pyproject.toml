@@ -5,12 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tna"
 version = "0.1.0"
-description = "Transition Network Analysis for Python - exact numerical equivalence to the R TNA package"
+description = "Transition Network Analysis for Python"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
 authors = [
-    {name = "TNA Contributors"}
+    {name = "Mohammed Saqr", email = "mohammed.saqr@uef.fi"},
+    {name = "Santtu Tikka", email = "santtu.tikka@jyu.fi"},
+    {name = "Sonsoles López-Pernas", email = "sonsoles.lopez@uef.fi"}
 ]
 keywords = [
     "network analysis",
@@ -64,13 +66,16 @@ Issues = "https://github.com/mohsaqr/tnapy/issues"
 include = ["tna*"]
 
 [tool.setuptools.package-data]
-tna = ["data/*.csv"]
+tna = ["data/*.csv", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::pyparsing.exceptions.PyparsingDeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py39"

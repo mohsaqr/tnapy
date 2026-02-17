@@ -1,10 +1,18 @@
 """Tests for compare_sequences."""
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
 import tna
+
+
+# Reference files for regression tests
+TEST_DATA_DIR = Path(__file__).parent / "data"
+REF_CS_NOTEST = TEST_DATA_DIR / "r_cs_notest.csv"
+REF_CS_CUSTOM = TEST_DATA_DIR / "r_cs_custom.csv"
 
 
 @pytest.fixture
@@ -33,36 +41,36 @@ class TestCompareSequencesNoTest:
             "prop_Low",
         ]
 
-    def test_frequencies_match_r(self, group_model):
-        """Verify frequencies match R ground truth exactly."""
+    def test_frequencies_match_reference(self, group_model):
+        """Verify frequencies match reference data exactly."""
         res = tna.compare_sequences(group_model)
-        r_res = pd.read_csv("/tmp/r_cs_notest.csv")
-        merged = pd.merge(res, r_res, on="pattern", suffixes=("_py", "_r"))
+        ref = pd.read_csv(REF_CS_NOTEST)
+        merged = pd.merge(res, ref, on="pattern", suffixes=("_py", "_ref"))
         assert len(merged) == 918
-        assert (merged["freq_High_py"] == merged["freq_High_r"]).all()
-        assert (merged["freq_Low_py"] == merged["freq_Low_r"]).all()
+        assert (merged["freq_High_py"] == merged["freq_High_ref"]).all()
+        assert (merged["freq_Low_py"] == merged["freq_Low_ref"]).all()
 
-    def test_proportions_match_r(self, group_model):
-        """Verify proportions match R ground truth to machine epsilon."""
+    def test_proportions_match_reference(self, group_model):
+        """Verify proportions match reference data to machine epsilon."""
         res = tna.compare_sequences(group_model)
-        r_res = pd.read_csv("/tmp/r_cs_notest.csv")
-        merged = pd.merge(res, r_res, on="pattern", suffixes=("_py", "_r"))
+        ref = pd.read_csv(REF_CS_NOTEST)
+        merged = pd.merge(res, ref, on="pattern", suffixes=("_py", "_ref"))
         np.testing.assert_allclose(
             merged["prop_High_py"].values,
-            merged["prop_High_r"].values,
+            merged["prop_High_ref"].values,
             atol=1e-12,
         )
         np.testing.assert_allclose(
             merged["prop_Low_py"].values,
-            merged["prop_Low_r"].values,
+            merged["prop_Low_ref"].values,
             atol=1e-12,
         )
 
-    def test_order_matches_r(self, group_model):
-        """Output order matches R: by length then alphabetical."""
+    def test_order_matches_reference(self, group_model):
+        """Output order matches reference: by length then alphabetical."""
         res = tna.compare_sequences(group_model)
-        r_res = pd.read_csv("/tmp/r_cs_notest.csv")
-        assert (res["pattern"].values == r_res["pattern"].values).all()
+        ref = pd.read_csv(REF_CS_NOTEST)
+        assert (res["pattern"].values == ref["pattern"].values).all()
 
     def test_unigram_proportions_sum_to_one(self, group_model):
         """Unigram proportions should sum to 1 per group."""
@@ -72,14 +80,14 @@ class TestCompareSequencesNoTest:
         np.testing.assert_allclose(unigrams["prop_Low"].sum(), 1.0, atol=1e-12)
 
     def test_custom_sub_and_min_freq(self, group_model):
-        """Match R with sub=1:3 and min_freq=10."""
+        """Match reference with sub=1:3 and min_freq=10."""
         res = tna.compare_sequences(group_model, sub=range(1, 4), min_freq=10)
-        r_res = pd.read_csv("/tmp/r_cs_custom.csv")
-        assert res.shape == r_res.shape
-        merged = pd.merge(res, r_res, on="pattern", suffixes=("_py", "_r"))
+        ref = pd.read_csv(REF_CS_CUSTOM)
+        assert res.shape == ref.shape
+        merged = pd.merge(res, ref, on="pattern", suffixes=("_py", "_ref"))
         assert len(merged) == len(res)
-        assert (merged["freq_High_py"] == merged["freq_High_r"]).all()
-        assert (merged["freq_Low_py"] == merged["freq_Low_r"]).all()
+        assert (merged["freq_High_py"] == merged["freq_High_ref"]).all()
+        assert (merged["freq_Low_py"] == merged["freq_Low_ref"]).all()
 
 
 class TestCompareSequencesWithTest:

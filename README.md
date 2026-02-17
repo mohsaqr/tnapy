@@ -376,22 +376,29 @@ If you use this package in your research, please cite:
 ```bibtex
 @software{tna_python,
   title = {TNA: Transition Network Analysis for Python},
-  author = {[Author Name]},
-  year = {2025},
-  url = {https://github.com/[username]/tna}
+  author  = "Saqr, Mohammed and Tikka, Santtu and López-Pernas, Sonsoles",
+  year = {2026},
+  url = {https://github.com/mohsaqr/tnapy}
 }
 ```
 
-Also cite the R TNA package:
+Also cite Transition Network Analysis as a method
 
 ```bibtex
-@Manual{tna_r,
-  title = {tna: Transition Network Analysis},
-  author = {Sonsoles López-Pernas and Mohammed Saqr and Santtu Tikka},
-  year = {2024},
-  note = {R package},
-  url = {https://CRAN.R-project.org/package=tna}
+@INPROCEEDINGS{Saqr2025-ku,
+  title     = "Transition Network Analysis: A Novel Framework for Modeling,
+               Visualizing, and Identifying the Temporal Patterns of Learners
+               and Learning Processes",
+  author    = "Saqr, Mohammed and López-Pernas, Sonsoles and Törmänen, Tiina and
+               Kaliisa, Rogers and Misiejuk, Kamila and Tikka, Santtu",
+  booktitle = "Proceedings of Learning Analytics \& Knowledge (LAK '25)",
+  publisher = "ACM",
+  address   = "New York, NY, USA",
+  doi       = "10.1145/3706468.3706513",
+  pages     = "351 - 361",
+  year      =  2025
 }
+
 ```
 
 ## License

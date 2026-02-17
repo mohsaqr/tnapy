@@ -313,7 +313,8 @@ def _betweenness_rsp(weights: np.ndarray, beta: float = 0.01) -> np.ndarray:
 
     # out <- diag(tcrossprod(Z, Z_recip - n * Z_recip_diag) %*% Z)
     # tcrossprod(A, B) = A %*% t(B)
-    out = np.diag(Z @ (Z_recip - n * Z_recip_diag).T @ Z)
+    with np.errstate(divide='ignore', over='ignore', invalid='ignore'):
+        out = np.diag(Z @ (Z_recip - n * Z_recip_diag).T @ Z)
 
     # out <- round(out)
     out = np.round(out)
