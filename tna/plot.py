@@ -1910,7 +1910,7 @@ def plot_mosaic(
                 ax.text(
                     x_start + row_offset + w / 2,
                     y_start + col_offset + h / 2,
-                    f'{tab[i, j]:.0f}',
+                    f'{tab[i, j]:g}',
                     ha='center', va='center',
                     fontsize=7,
                     color='black' if abs(residuals[i, j]) < 2.5 else 'white',
