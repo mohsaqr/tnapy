@@ -15,9 +15,12 @@ tna/                    # Main package
   communities.py        # communities(), CommunityResult
   group.py              # GroupTNA, group_tna(), group_ftna(), group_ctna(), group_atna()
   compare.py            # compare_sequences()
-  bootstrap.py          # bootstrap_tna(), permutation_test(), BootstrapResult, PermutationResult
+  bootstrap.py          # bootstrap_tna(), permutation_test(), bootstrap_centralities(),
+                        #   estimate_cs(), BootstrapResult, PermutationResult
   plot.py               # plot_network(), plot_centralities(), plot_heatmap(), plot_comparison(),
-                        #   plot_sequences(), plot_frequencies(), plot_histogram(), plot_communities()
+                        #   plot_sequences(), plot_frequencies(), plot_histogram(), plot_communities(),
+                        #   plot_bootstrap(), plot_network_ci(), plot_cs(), plot_permutation(),
+                        #   plot_compare(), plot_mosaic()
   colors.py             # color_palette(), DEFAULT_COLORS, create_color_map()
   utils.py              # row_normalize(), minmax_scale(), max_scale(), rank_scale(), apply_scaling()
   data.py               # load_group_regulation(), load_group_regulation_long()
