@@ -168,20 +168,20 @@ def _transitions_cooccurrence(
         if first_state in state_to_idx:
             inits[state_to_idx[first_state]] += 1
 
-        # Count co-occurrences (bidirectional adjacent pairs)
+        # Count co-occurrences: all pairs (i, j) where i < j — matches R
         for i in range(len(valid) - 1):
-            state1 = valid[i][1]
-            state2 = valid[i + 1][1]
-            if state1 in state_to_idx and state2 in state_to_idx:
-                idx1, idx2 = state_to_idx[state1], state_to_idx[state2]
-                counts[idx1, idx2] += 1
-                counts[idx2, idx1] += 1
+            for j in range(i + 1, len(valid)):
+                state1 = valid[i][1]
+                state2 = valid[j][1]
+                if state1 in state_to_idx and state2 in state_to_idx:
+                    idx1, idx2 = state_to_idx[state1], state_to_idx[state2]
+                    counts[idx1, idx2] += 1
+                    counts[idx2, idx1] += 1
 
-    # Normalize
-    weights = row_normalize(counts)
+    # Co-occurrence returns raw counts (not normalized)
     inits = inits / inits.sum() if inits.sum() > 0 else inits
 
-    return weights, inits
+    return counts, inits
 
 
 def _transitions_reverse(
@@ -362,11 +362,10 @@ def _transitions_attention(
                 weight = np.exp(-beta * distance)
                 counts[state_to_idx[from_state], state_to_idx[to_state]] += weight
 
-    # Normalize
-    weights = row_normalize(counts)
+    # Attention returns raw weighted counts (not normalized)
     inits = inits / inits.sum() if inits.sum() > 0 else inits
 
-    return weights, inits
+    return counts, inits
 
 
 def _is_na(val) -> bool:

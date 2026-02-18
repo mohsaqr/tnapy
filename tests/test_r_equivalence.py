@@ -280,10 +280,10 @@ class TestCooccurrenceModelRValues:
         df = tna.load_group_regulation()
         return tna.ctna(df)
 
-    def test_cooccurrence_row_stochastic(self, cmodel):
-        """Co-occurrence model should be row-normalized (rows sum to 1)."""
-        row_sums = cmodel.weights.sum(axis=1)
-        np.testing.assert_array_almost_equal(row_sums, np.ones(9), decimal=10)
+    def test_cooccurrence_raw_counts(self, cmodel):
+        """Co-occurrence model should return raw counts (not row-normalized)."""
+        assert np.all(cmodel.weights >= 0)
+        assert cmodel.weights.sum() > 9
 
     def test_cooccurrence_nonnegative(self, cmodel):
         """All co-occurrence weights should be non-negative."""
@@ -327,10 +327,10 @@ class TestAllModelTypes:
         assert model.weights.sum() <= total_transitions
 
     def test_cooccurrence_model_structure(self, simple_data):
-        """Co-occurrence model should have valid structure."""
+        """Co-occurrence model should return raw counts."""
         model = tna.build_model(simple_data, type_='co-occurrence')
-        row_sums = model.weights.sum(axis=1)
-        np.testing.assert_array_almost_equal(row_sums, np.ones(3), decimal=10)
+        assert np.all(model.weights >= 0)
+        assert model.weights.sum() > 3
 
     def test_reverse_model_different(self, simple_data):
         """Reverse model should differ from forward model."""
@@ -359,12 +359,12 @@ class TestAllModelTypes:
         row_sums = model.weights.sum(axis=1)
         np.testing.assert_array_almost_equal(row_sums, np.ones(3), decimal=10)
 
-    def test_attention_model_row_stochastic(self, simple_data):
-        """Attention model should have row-stochastic matrix."""
+    def test_attention_model_raw_counts(self, simple_data):
+        """Attention model should return raw weighted counts."""
         model = tna.build_model(simple_data, type_='attention',
                                 params={'beta': 0.1})
-        row_sums = model.weights.sum(axis=1)
-        np.testing.assert_array_almost_equal(row_sums, np.ones(3), decimal=10)
+        assert np.all(model.weights >= 0)
+        assert model.weights.sum() > 3
 
     def test_all_model_types_with_group_regulation(self, group_regulation_data):
         """Test all model types with real group regulation data."""
@@ -385,7 +385,7 @@ class TestAllModelTypes:
             assert model.weights.shape == (9, 9)
             assert len(model.labels) == 9
 
-            if type_ not in ['frequency']:
+            if type_ not in ['frequency', 'co-occurrence', 'attention']:
                 row_sums = model.weights.sum(axis=1)
                 np.testing.assert_array_almost_equal(
                     row_sums, np.ones(9), decimal=10,
