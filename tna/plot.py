@@ -1593,14 +1593,13 @@ def plot_compare(
         fig = ax.figure
 
     # Node colors: green if init_diff > 0, red if < 0, grey if ~0
+    from matplotlib.colors import to_rgba
     abs_init = np.abs(init_diff)
     max_init = abs_init.max() if abs_init.max() > 0 else 1.0
     node_colors = []
     for i in range(n):
         if init_diff[i] > 1e-12:
             alpha = 0.3 + 0.7 * abs(init_diff[i]) / max_init
-            # Blend green with white
-            from matplotlib.colors import to_rgba
             base = to_rgba(pos_col)
             node_colors.append((*base[:3], alpha))
         elif init_diff[i] < -1e-12:
