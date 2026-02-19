@@ -276,6 +276,7 @@ def plot_network(
     labels: list[str] | None = None,
     colors: list[str] | None = None,
     layout: str = "circular",
+    pos: dict[str, tuple[float, float]] | None = None,
     node_size: str | float | None = None,
     node_size_range: tuple[float, float] = (800, 3000),
     vsize: float = 1400,
@@ -311,7 +312,10 @@ def plot_network(
         Custom node colors. If None, generates automatically.
     layout : str
         Layout algorithm: 'circular', 'spring', 'kamada_kawai', 'shell',
-        'spectral', 'random'
+        'spectral', 'random'. Ignored when pos is provided.
+    pos : dict, optional
+        Custom node positions as ``{label: (x, y)}``.
+        When provided, the layout algorithm is skipped entirely.
     node_size : str or float, optional
         If str, name of centrality measure to scale nodes by
         ('OutStrength', 'InStrength', 'Betweenness', etc.).
@@ -359,7 +363,7 @@ def plot_network(
     ax : matplotlib Axes, optional
         Axes to plot on. If None, creates new figure.
     seed : int, optional
-        Random seed for reproducible layouts
+        Random seed for reproducible layouts. Ignored when pos is provided.
     **kwargs
         Additional arguments passed to networkx drawing functions
 
@@ -378,6 +382,10 @@ def plot_network(
 
     >>> # With centrality-based node sizing
     >>> tna.plot_network(model, node_size='OutStrength', layout='spring')
+
+    >>> # With custom node positions
+    >>> positions = {'A': (0, 1), 'B': (1, 0), 'C': (-1, 0)}
+    >>> tna.plot_network(model, pos=positions)
     """
     # Handle GroupTNA input → side-by-side subplots
     from .group import _is_group_tna
@@ -391,7 +399,7 @@ def plot_network(
         for ax_i, (name, m) in zip(axes, model.items()):
             group_title = name if title is None else f"{title} — {name}"
             plot_network(
-                m, labels=labels, colors=colors, layout=layout,
+                m, labels=labels, colors=colors, layout=layout, pos=pos,
                 node_size=node_size, node_size_range=node_size_range,
                 vsize=vsize, edge_labels=edge_labels,
                 edge_threshold=edge_threshold,
@@ -416,7 +424,8 @@ def plot_network(
     G = _create_networkx_graph(model)
 
     # Get layout positions
-    pos = _get_layout(G, layout, seed=seed)
+    if pos is None:
+        pos = _get_layout(G, layout, seed=seed)
 
     # Setup figure
     if ax is None:
@@ -1466,6 +1475,7 @@ def plot_compare(
     pos_col: str = '#009900',
     neg_col: str = 'red',
     layout: str = 'circular',
+    pos: dict[str, tuple[float, float]] | None = None,
     edge_labels: bool = True,
     edge_width_range: tuple[float, float] = (0.5, 5.0),
     show_self_loops: bool = True,
@@ -1498,7 +1508,10 @@ def plot_compare(
     neg_col : str
         Color for edges where y > x (default red).
     layout : str
-        Layout algorithm.
+        Layout algorithm. Ignored when pos is provided.
+    pos : dict, optional
+        Custom node positions as ``{label: (x, y)}``.
+        When provided, the layout algorithm is skipped.
     edge_labels : bool
         Show absolute difference labels on edges.
     edge_width_range : tuple
@@ -1550,7 +1563,7 @@ def plot_compare(
         m2 = x[names[1]]
         default_title = f'{names[0]} vs {names[1]}'
         return plot_compare(
-            m1, m2, pos_col=pos_col, neg_col=neg_col, layout=layout,
+            m1, m2, pos_col=pos_col, neg_col=neg_col, layout=layout, pos=pos,
             edge_labels=edge_labels, edge_width_range=edge_width_range,
             show_self_loops=show_self_loops, self_loop_scale=self_loop_scale,
             curved_edges=curved_edges, arrow_size=arrow_size,
@@ -1585,7 +1598,8 @@ def plot_compare(
             if abs(diff[i, j]) > 1e-12:
                 G.add_edge(labels[i], labels[j], weight=diff[i, j])
 
-    pos = _get_layout(G, layout, seed=seed)
+    if pos is None:
+        pos = _get_layout(G, layout, seed=seed)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
