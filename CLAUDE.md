@@ -17,10 +17,10 @@ tna/                    # Main package
   compare.py            # compare_sequences()
   bootstrap.py          # bootstrap_tna(), permutation_test(), bootstrap_centralities(),
                         #   estimate_cs(), BootstrapResult, PermutationResult
-  plot.py               # plot_network(), plot_centralities(), plot_heatmap(), plot_comparison(),
+  plot.py               # plot_network(pos=), plot_centralities(), plot_heatmap(), plot_comparison(),
                         #   plot_sequences(), plot_frequencies(), plot_histogram(), plot_communities(),
                         #   plot_bootstrap(), plot_network_ci(), plot_cs(), plot_permutation(),
-                        #   plot_compare(), plot_mosaic()
+                        #   plot_compare(pos=), plot_mosaic()
   colors.py             # color_palette(), DEFAULT_COLORS, create_color_map()
   utils.py              # row_normalize(), minmax_scale(), max_scale(), rank_scale(), apply_scaling()
   data.py               # load_group_regulation(), load_group_regulation_long()
@@ -34,6 +34,7 @@ tmp/                    # Rendered HTML outputs (not tracked in git)
 - **GroupTNA duck typing**: `_is_group_tna()` uses `hasattr(x, 'models')` to avoid circular imports. Every analysis function checks this at the top and dispatches per-group.
 - **R equivalence**: Bootstrap/permutation algorithms replicate R's exact approach (resampling 3D transition arrays, not raw sequences). Centralities use inverted weights (`1/w`) matching R igraph conventions.
 - **Plot backend**: matplotlib with FancyArrowPatch for directed edges, Arc for self-loops. No qgraph dependency.
+- **Custom positions**: `plot_network()` and `plot_compare()` accept optional `pos={label: (x, y)}` dict to skip layout algorithm.
 
 ## Development Commands
 ```bash
