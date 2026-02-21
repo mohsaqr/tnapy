@@ -6,11 +6,22 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from scipy.cluster.hierarchy import cut_tree, linkage
-from scipy.spatial.distance import squareform
 
 
 _SENTINEL = "\x00__NA__"
+
+
+def _effective_length(seq: list[str]) -> int:
+    """Position of the last non-sentinel token (1-indexed), matching R's seq2chr 'len'.
+
+    R truncates sequences at the last observed (non-NA) value before
+    computing edit distances.  Hamming still uses the full sequence.
+    """
+    last = 0
+    for i, tok in enumerate(seq):
+        if tok != _SENTINEL:
+            last = i + 1  # 1-indexed
+    return last
 
 
 @dataclass
@@ -106,8 +117,23 @@ def _hamming_distance(
     return dist
 
 
-def _levenshtein_distance(a: list[str], b: list[str]) -> float:
-    """Levenshtein edit distance (insert, delete, substitute)."""
+def _levenshtein_distance(
+    a: list[str], b: list[str],
+    len_a: int | None = None, len_b: int | None = None,
+) -> float:
+    """Levenshtein edit distance (insert, delete, substitute).
+
+    When *len_a* / *len_b* are given, only the first *len_a* / *len_b*
+    tokens are used (matching R's truncation at last non-NA position).
+
+    Note: substitution cost is **inverted** (cost=1 for match, cost=0
+    for mismatch) to replicate R TNA's internal ``levenshtein_dist``
+    C function, which uses ``cost = 0L + 1L * (x[i] == y[j])``.
+    """
+    if len_a is not None:
+        a = a[:len_a]
+    if len_b is not None:
+        b = b[:len_b]
     m, n = len(a), len(b)
     # O(n) space DP
     prev = list(range(n + 1))
@@ -115,7 +141,8 @@ def _levenshtein_distance(a: list[str], b: list[str]) -> float:
     for i in range(1, m + 1):
         curr[0] = i
         for j in range(1, n + 1):
-            cost = 0 if a[i - 1] == b[j - 1] else 1
+            # R TNA inverted cost: match=1, mismatch=0
+            cost = 1 if a[i - 1] == b[j - 1] else 0
             curr[j] = min(
                 prev[j] + 1,       # deletion
                 curr[j - 1] + 1,   # insertion
@@ -125,10 +152,21 @@ def _levenshtein_distance(a: list[str], b: list[str]) -> float:
     return float(prev[n])
 
 
-def _osa_distance(a: list[str], b: list[str]) -> float:
-    """Optimal String Alignment distance (Levenshtein + adjacent transposition)."""
+def _osa_distance(
+    a: list[str], b: list[str],
+    len_a: int | None = None, len_b: int | None = None,
+) -> float:
+    """Optimal String Alignment distance (Levenshtein + adjacent transposition).
+
+    Note: substitution/transposition cost is **inverted** (cost=1 for
+    match, cost=0 for mismatch) to replicate R TNA's internal
+    ``osa_dist`` C function.
+    """
+    if len_a is not None:
+        a = a[:len_a]
+    if len_b is not None:
+        b = b[:len_b]
     m, n = len(a), len(b)
-    # Need 3 rows for transposition check
     if m == 0:
         return float(n)
     if n == 0:
@@ -143,7 +181,8 @@ def _osa_distance(a: list[str], b: list[str]) -> float:
 
     for i in range(1, m + 1):
         for j in range(1, n + 1):
-            cost = 0 if a[i - 1] == b[j - 1] else 1
+            # R TNA inverted cost: match=1, mismatch=0
+            cost = 1 if a[i - 1] == b[j - 1] else 0
             d[i, j] = min(
                 d[i - 1, j] + 1,       # deletion
                 d[i, j - 1] + 1,       # insertion
@@ -159,11 +198,18 @@ def _osa_distance(a: list[str], b: list[str]) -> float:
     return float(d[m, n])
 
 
-def _lcs_distance(a: list[str], b: list[str]) -> float:
+def _lcs_distance(
+    a: list[str], b: list[str],
+    len_a: int | None = None, len_b: int | None = None,
+) -> float:
     """LCS-based distance = max(m, n) - LCS_length.
 
     Matches the R TNA package definition.
     """
+    if len_a is not None:
+        a = a[:len_a]
+    if len_b is not None:
+        b = b[:len_b]
     m, n = len(a), len(b)
     # O(n) space DP for LCS length
     prev = [0] * (n + 1)
@@ -193,7 +239,11 @@ def _compute_distance_matrix(
     weighted: bool = False,
     lambda_: float = 1.0,
 ) -> np.ndarray:
-    """Compute pairwise distance matrix."""
+    """Compute pairwise distance matrix.
+
+    For edit-distance metrics (lv, osa, lcs) sequences are truncated at
+    the last non-NA position, matching R's ``seq2chr`` behaviour.
+    """
     n = len(sequences)
     dist = np.zeros((n, n))
 
@@ -208,9 +258,14 @@ def _compute_distance_matrix(
                 dist[j, i] = d
     else:
         func = _DISTANCE_FUNCS[dissimilarity]
+        # Pre-compute effective lengths for edit-distance truncation
+        eff_lens = [_effective_length(seq) for seq in sequences]
         for i in range(n):
             for j in range(i + 1, n):
-                d = func(sequences[i], sequences[j])
+                d = func(
+                    sequences[i], sequences[j],
+                    len_a=eff_lens[i], len_b=eff_lens[j],
+                )
                 dist[i, j] = d
                 dist[j, i] = d
 
@@ -272,22 +327,27 @@ def _pam(dist: np.ndarray, k: int) -> np.ndarray:
 
     # BUILD phase: greedily select k medoids
     medoids: list[int] = []
-    # First medoid: minimizes total distance to all points
+    # First medoid: minimizes total distance to all points (last-wins, matching R)
     total_dists = dist.sum(axis=1)
-    medoids.append(int(np.argmin(total_dists)))
+    best_idx = 0
+    for i in range(1, n):
+        if total_dists[i] <= total_dists[best_idx]:
+            best_idx = i
+    medoids.append(best_idx)
 
     # Track nearest medoid distance for each point
     nearest_dist = dist[:, medoids[0]].copy()
 
     for _ in range(1, k):
         # For each candidate, compute gain = sum of max(0, nearest_dist - d(j, candidate))
+        # Use >= for last-wins tie-breaking (matches R)
         best_gain = -np.inf
         best_candidate = -1
         for candidate in range(n):
             if candidate in medoids:
                 continue
             gain = np.maximum(0, nearest_dist - dist[:, candidate]).sum()
-            if gain > best_gain:
+            if gain >= best_gain:
                 best_gain = gain
                 best_candidate = candidate
         medoids.append(best_candidate)
@@ -332,41 +392,148 @@ def _pam(dist: np.ndarray, k: int) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Hierarchical clustering
+# Hierarchical clustering (Lance-Williams, matches R hclust exactly)
 # ---------------------------------------------------------------------------
 
-# Mapping from R-style method names to scipy linkage methods
-_LINKAGE_METHODS = {
-    "ward.D": "ward",
-    "ward.D2": "ward",
-    "complete": "complete",
-    "average": "average",
-    "single": "single",
-    "mcquitty": "weighted",
-    "median": "median",
-    "centroid": "centroid",
-}
+
+def _lance_williams_coeffs(
+    method: str, n_i: int, n_j: int, n_k: int,
+) -> tuple[float, float, float, float]:
+    """Return (alpha_i, alpha_j, beta, gamma) for the Lance-Williams update.
+
+    Definitions match R's ``hclust``.
+    """
+    if method == "single":
+        return 0.5, 0.5, 0.0, -0.5
+    if method == "complete":
+        return 0.5, 0.5, 0.0, 0.5
+    if method == "average":
+        ni, nj = float(n_i), float(n_j)
+        s = ni + nj
+        return ni / s, nj / s, 0.0, 0.0
+    if method == "mcquitty":
+        return 0.5, 0.5, 0.0, 0.0
+    if method == "ward.D" or method == "ward.D2":
+        ni, nj, nk = float(n_i), float(n_j), float(n_k)
+        total = ni + nj + nk
+        return (ni + nk) / total, (nj + nk) / total, -nk / total, 0.0
+    if method == "median":
+        return 0.5, 0.5, -0.25, 0.0
+    if method == "centroid":
+        ni, nj = float(n_i), float(n_j)
+        s = ni + nj
+        return ni / s, nj / s, -(ni * nj) / (s * s), 0.0
+    raise ValueError(f"Unknown method: {method}")
 
 
 def _hierarchical(dist: np.ndarray, k: int, method: str) -> np.ndarray:
-    """Hierarchical clustering using scipy.
+    """Hierarchical agglomerative clustering using Lance-Williams formula.
+
+    Matches R's ``hclust`` exactly (including tie-breaking: last-wins
+    when scanning for the minimum distance pair).
 
     Returns 1-indexed cluster assignments.
     """
-    scipy_method = _LINKAGE_METHODS[method]
+    n = dist.shape[0]
+    # Work on squared distances for ward.D2
+    d = dist.copy().astype(float)
+    if method == "ward.D2":
+        d = d ** 2
 
-    # Convert to condensed form for linkage
-    condensed = squareform(dist)
+    INF = float("inf")
+    active = list(range(n))  # active cluster indices
+    sizes = [1] * n          # cluster sizes
+    cluster_id = list(range(n))  # maps active idx → cluster id
+    merges: list[tuple[int, int, int]] = []  # (id_i, id_j, new_id)
+    next_id = n
 
-    # ward.D uses raw distances; ward.D2 uses squared distances
-    if method == "ward.D":
-        condensed = condensed ** 2
+    for _step in range(n - 1):
+        # Find minimum distance pair (last-wins tie-breaking like R)
+        min_val = INF
+        mi = mj = -1
+        for ii in range(len(active)):
+            for jj in range(ii + 1, len(active)):
+                ai, aj = active[ii], active[jj]
+                v = d[ai, aj]
+                if v < min_val:
+                    min_val = v
+                    mi, mj = ii, jj
 
-    Z = linkage(condensed, method=scipy_method)
-    # Use cut_tree instead of fcluster — fcluster fails when merge
-    # heights are tied; cut_tree matches R's cutree behavior.
-    labels = cut_tree(Z, n_clusters=k).flatten() + 1  # 1-indexed
-    return labels
+        ci = active[mi]
+        cj = active[mj]
+        n_i = sizes[ci]
+        n_j = sizes[cj]
+
+        # Record merge
+        merges.append((cluster_id[ci], cluster_id[cj], next_id))
+
+        # Update distances using Lance-Williams
+        for kk in range(len(active)):
+            ck = active[kk]
+            if ck == ci or ck == cj:
+                continue
+            n_k = sizes[ck]
+            ai, aj, beta, gamma = _lance_williams_coeffs(method, n_i, n_j, n_k)
+            new_d = ai * d[ci, ck] + aj * d[cj, ck] + beta * d[ci, cj] + gamma * abs(d[ci, ck] - d[cj, ck])
+            d[ci, ck] = new_d
+            d[ck, ci] = new_d
+
+        # Merge j into i
+        sizes[ci] = n_i + n_j
+        cluster_id[ci] = next_id
+        next_id += 1
+
+        # Remove j from active
+        active.pop(mj)
+
+    # Cut tree: trace merges to find k clusters
+    # Start: each original point is its own cluster
+    parent = {}  # id → parent id
+    children: dict[int, list[int]] = {}
+    for id_i, id_j, new_id in merges:
+        parent[id_i] = new_id
+        parent[id_j] = new_id
+        children[new_id] = [id_i, id_j]
+
+    # The last k-1 merges reduce n clusters to 1.
+    # To get k clusters, undo the last k-1 merges.
+    # Active clusters after n-k merges:
+    cut_merges = merges[: n - k]
+    merged_ids = set()
+    for id_i, id_j, new_id in cut_merges:
+        merged_ids.add(id_i)
+        merged_ids.add(id_j)
+
+    # Find root clusters at cut point
+    root_clusters = set()
+    for id_i, id_j, new_id in cut_merges:
+        root_clusters.discard(id_i)
+        root_clusters.discard(id_j)
+        root_clusters.add(new_id)
+    # Also add any original points never merged in the first n-k merges
+    all_merged = set()
+    for id_i, id_j, new_id in cut_merges:
+        all_merged.add(id_i)
+        all_merged.add(id_j)
+    for i in range(n):
+        if i not in all_merged:
+            root_clusters.add(i)
+
+    # Assign each original point to its root cluster
+    def get_leaves(node: int) -> list[int]:
+        if node < n:
+            return [node]
+        result = []
+        for child in children.get(node, []):
+            result.extend(get_leaves(child))
+        return result
+
+    assignments = np.zeros(n, dtype=int)
+    for label, root in enumerate(sorted(root_clusters), 1):
+        for leaf in get_leaves(root):
+            assignments[leaf] = label
+
+    return assignments
 
 
 # ---------------------------------------------------------------------------
@@ -426,10 +593,14 @@ def cluster_sequences(
             f"Choose from: {list(_DISTANCE_FUNCS.keys())}"
         )
 
-    if method != "pam" and method not in _LINKAGE_METHODS:
+    _VALID_METHODS = {
+        "pam", "ward.D", "ward.D2", "complete", "average",
+        "single", "mcquitty", "median", "centroid",
+    }
+    if method not in _VALID_METHODS:
         raise ValueError(
             f"Unknown method {method!r}. "
-            f"Choose 'pam' or one of: {list(_LINKAGE_METHODS.keys())}"
+            f"Choose from: {sorted(_VALID_METHODS)}"
         )
 
     if k < 2:

@@ -53,7 +53,7 @@ def compute_transitions(
     elif type_ == "frequency":
         weights, inits = _transitions_frequency(data, state_to_idx, n_states)
     elif type_ == "co-occurrence":
-        weights, inits = _transitions_cooccurrence(data, state_to_idx, n_states)
+        weights, inits = _transitions_cooccurrence(data, state_to_idx, n_states, params)
     elif type_ == "reverse":
         weights, inits = _transitions_reverse(data, state_to_idx, n_states)
     elif type_ == "n-gram":
@@ -152,9 +152,18 @@ def _transitions_frequency(
 def _transitions_cooccurrence(
     data: np.ndarray,
     state_to_idx: dict,
-    n_states: int
+    n_states: int,
+    params: dict | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute bidirectional co-occurrence matrix."""
+    params = params or {}
+    if params.get('windowed'):
+        return _transitions_cooccurrence_windowed(
+            data, state_to_idx, n_states,
+            params.get('window_size', 1),
+            params.get('window_span', 1),
+        )
+
     counts = np.zeros((n_states, n_states))
     inits = np.zeros(n_states)
 
@@ -180,6 +189,69 @@ def _transitions_cooccurrence(
 
     # Co-occurrence returns raw counts (not normalized)
     inits = inits / inits.sum() if inits.sum() > 0 else inits
+
+    return counts, inits
+
+
+def _transitions_cooccurrence_windowed(
+    data: np.ndarray,
+    state_to_idx: dict,
+    n_states: int,
+    window_size: int,
+    window_span: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute windowed co-occurrence matrix matching R TNA's compute_transitions_windowed.
+
+    Splits columns into non-overlapping windows of effective_window size,
+    then counts all (j, k) column pairs within each window (including j==k).
+    """
+    n_seqs = data.shape[0]
+    n_cols = data.shape[1]
+    eff_window = window_size * window_span
+
+    # Number of windows — matches R: q = p %/% ew - (p %% ew == 0); n_windows = q + 1
+    divides = (n_cols % eff_window == 0)
+    q = n_cols // eff_window - int(divides)
+    n_windows = q + 1
+
+    # Sum over sequences: build 3D then sum, matching R
+    trans = np.zeros((n_seqs, n_states, n_states))
+
+    for w in range(n_windows):
+        w_start = w * eff_window
+        w_end = min(n_cols, (w + 1) * eff_window)
+
+        for j in range(w_start, w_end):
+            for k in range(w_start, w_end):
+                for row in range(n_seqs):
+                    from_val = data[row, j]
+                    to_val = data[row, k]
+                    if _is_na(from_val) or _is_na(to_val):
+                        continue
+                    from_str = str(from_val)
+                    to_str = str(to_val)
+                    if from_str in state_to_idx and to_str in state_to_idx:
+                        fi = state_to_idx[from_str]
+                        ti = state_to_idx[to_str]
+                        trans[row, fi, ti] += 1
+
+    # Sum across sequences
+    counts = trans.sum(axis=0)
+
+    # Compute inits from first column (matches R: factor(x[, 1L], ...))
+    inits = np.zeros(n_states)
+    for row in range(n_seqs):
+        val = data[row, 0]
+        if not _is_na(val):
+            s = str(val)
+            if s in state_to_idx:
+                inits[state_to_idx[s]] += 1
+    # R produces NaN when all first-column values are NA (0/0 division)
+    init_sum = inits.sum()
+    if init_sum > 0:
+        inits = inits / init_sum
+    else:
+        inits = np.full(n_states, np.nan)
 
     return counts, inits
 
@@ -443,20 +515,47 @@ def compute_transitions_3d(
                     trans[row, state_to_idx[from_str], state_to_idx[to_str]] += 1
 
     elif type_ == "co-occurrence":
-        for i in range(n_steps - 1):
-            for j in range(i + 1, n_steps):
-                for row in range(n_sequences):
-                    from_val = data[row, i]
-                    to_val = data[row, j]
-                    if _is_na(from_val) or _is_na(to_val):
-                        continue
-                    from_str = str(from_val)
-                    to_str = str(to_val)
-                    if from_str in state_to_idx and to_str in state_to_idx:
-                        fi = state_to_idx[from_str]
-                        ti = state_to_idx[to_str]
-                        trans[row, fi, ti] += 1
-                        trans[row, ti, fi] += 1
+        if params.get('windowed'):
+            # Windowed co-occurrence: non-overlapping windows, all (j,k) pairs
+            ws = params.get('window_size', 1)
+            wspan = params.get('window_span', 1)
+            eff_window = ws * wspan
+            divides = (n_steps % eff_window == 0)
+            q = n_steps // eff_window - int(divides)
+            n_windows = q + 1
+
+            for w in range(n_windows):
+                w_start = w * eff_window
+                w_end = min(n_steps, (w + 1) * eff_window)
+                for j in range(w_start, w_end):
+                    for k in range(w_start, w_end):
+                        for row in range(n_sequences):
+                            from_val = data[row, j]
+                            to_val = data[row, k]
+                            if _is_na(from_val) or _is_na(to_val):
+                                continue
+                            from_str = str(from_val)
+                            to_str = str(to_val)
+                            if from_str in state_to_idx and to_str in state_to_idx:
+                                fi = state_to_idx[from_str]
+                                ti = state_to_idx[to_str]
+                                trans[row, fi, ti] += 1
+        else:
+            # Standard all-pairs co-occurrence
+            for i in range(n_steps - 1):
+                for j in range(i + 1, n_steps):
+                    for row in range(n_sequences):
+                        from_val = data[row, i]
+                        to_val = data[row, j]
+                        if _is_na(from_val) or _is_na(to_val):
+                            continue
+                        from_str = str(from_val)
+                        to_str = str(to_val)
+                        if from_str in state_to_idx and to_str in state_to_idx:
+                            fi = state_to_idx[from_str]
+                            ti = state_to_idx[to_str]
+                            trans[row, fi, ti] += 1
+                            trans[row, ti, fi] += 1
 
     return trans
 

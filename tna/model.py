@@ -283,7 +283,8 @@ def ctna(
 ) -> TNA:
     """Build a co-occurrence transition model.
 
-    Counts bidirectional adjacent co-occurrences.
+    Counts bidirectional co-occurrences. When input has windowed attributes
+    (from ``import_onehot``), uses windowed co-occurrence matching R TNA.
 
     Parameters
     ----------
@@ -305,9 +306,19 @@ def ctna(
     TNA
         The built TNA model
     """
+    # Extract window metadata from DataFrame attrs (set by import_onehot)
+    params = None
+    if isinstance(x, pd.DataFrame) and x.attrs.get('windowed'):
+        params = {
+            'windowed': True,
+            'window_size': x.attrs.get('window_size', 1),
+            'window_span': x.attrs.get('window_span', 1),
+        }
+
     return build_model(
         x, type_="co-occurrence", scaling=scaling, cols=cols,
-        labels=labels, begin_state=begin_state, end_state=end_state
+        labels=labels, begin_state=begin_state, end_state=end_state,
+        params=params
     )
 
 

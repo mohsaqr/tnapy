@@ -89,6 +89,11 @@ def centralities(
     # R uses igraph, we use networkx but match behavior
     G = _create_graph(weights)
 
+    # Undirected model types use undirected betweenness
+    is_undirected = getattr(model, 'type_', 'relative') in (
+        "co-occurrence", "attention",
+    )
+
     # Compute requested measures in order they appear in AVAILABLE_MEASURES
     for measure in AVAILABLE_MEASURES:
         if measure not in measures:
@@ -104,7 +109,11 @@ def centralities(
         elif measure == 'Closeness':
             results['Closeness'] = _closeness_all(G, n)
         elif measure == 'Betweenness':
-            results['Betweenness'] = _betweenness(G, n)
+            if is_undirected:
+                Gu = _create_graph(weights, directed=False)
+                results['Betweenness'] = _betweenness(Gu, n)
+            else:
+                results['Betweenness'] = _betweenness(G, n)
         elif measure == 'BetweennessRSP':
             results['BetweennessRSP'] = _betweenness_rsp(weights)
         elif measure == 'Diffusion':
@@ -128,10 +137,12 @@ def centralities(
     return df
 
 
-def _create_graph(weights: np.ndarray) -> nx.DiGraph:
-    """Create NetworkX DiGraph from weight matrix."""
+def _create_graph(
+    weights: np.ndarray, directed: bool = True,
+) -> nx.DiGraph | nx.Graph:
+    """Create NetworkX graph from weight matrix."""
     n = weights.shape[0]
-    G = nx.DiGraph()
+    G = nx.DiGraph() if directed else nx.Graph()
     G.add_nodes_from(range(n))
     for i in range(n):
         for j in range(n):
@@ -423,13 +434,8 @@ def betweenness_network(model: 'TNA') -> 'TNA':
     weights = model.weights.copy()
     n = weights.shape[0]
 
-    # Create directed graph with inverse weights as distance
-    G = nx.DiGraph()
-    G.add_nodes_from(range(n))
-    for i in range(n):
-        for j in range(n):
-            if weights[i, j] > 0:
-                G.add_edge(i, j, weight=weights[i, j])
+    is_undirected = model.type_ in ("co-occurrence", "attention")
+    G = _create_graph(weights, directed=not is_undirected)
 
     # Compute edge betweenness using 1/weight as distance
     eb = nx.edge_betweenness_centrality(
@@ -440,8 +446,11 @@ def betweenness_network(model: 'TNA') -> 'TNA':
 
     # Build betweenness weight matrix
     bet_weights = np.zeros((n, n))
-    for (i, j), val in eb.items():
+    for edge, val in eb.items():
+        i, j = edge
         bet_weights[i, j] = val
+        if is_undirected:
+            bet_weights[j, i] = val
 
     return TNAClass(
         weights=bet_weights,

@@ -46,42 +46,50 @@ class TestHammingDistance:
 
 
 class TestLevenshteinDistance:
+    # Note: substitution cost is inverted (match=1, mismatch=0) to replicate
+    # R TNA's internal levenshtein_dist C function.
+
     def test_identical(self):
-        assert _levenshtein_distance(["A", "B", "C"], ["A", "B", "C"]) == 0.0
+        # With inverted cost, identical strings have high distance (all matches cost 1)
+        assert _levenshtein_distance(["A", "B", "C"], ["A", "B", "C"]) == 2.0
 
     def test_single_insert(self):
-        assert _levenshtein_distance(["A", "B"], ["A", "X", "B"]) == 1.0
+        assert _levenshtein_distance(["A", "B"], ["A", "X", "B"]) == 2.0
 
     def test_single_delete(self):
-        assert _levenshtein_distance(["A", "X", "B"], ["A", "B"]) == 1.0
+        assert _levenshtein_distance(["A", "X", "B"], ["A", "B"]) == 2.0
 
     def test_single_substitute(self):
-        assert _levenshtein_distance(["A", "B", "C"], ["A", "X", "C"]) == 1.0
+        # With inverted cost, mismatch has cost=0, so this is "cheaper"
+        assert _levenshtein_distance(["A", "B", "C"], ["A", "X", "C"]) == 2.0
 
     def test_empty_vs_nonempty(self):
+        # Insertions/deletions still cost 1 each
         assert _levenshtein_distance([], ["A", "B", "C"]) == 3.0
         assert _levenshtein_distance(["A", "B"], []) == 2.0
 
     def test_classic_example(self):
-        # "kitten" → "sitting" = 3 edits
         a = list("kitten")
         b = list("sitting")
-        assert _levenshtein_distance(a, b) == 3.0
+        assert _levenshtein_distance(a, b) == 2.0
 
 
 class TestOSADistance:
+    # Note: substitution/transposition cost is inverted (match=1, mismatch=0)
+    # to replicate R TNA's internal osa_dist C function.
+
     def test_identical(self):
-        assert _osa_distance(["A", "B", "C"], ["A", "B", "C"]) == 0.0
+        assert _osa_distance(["A", "B", "C"], ["A", "B", "C"]) == 2.0
 
     def test_transposition(self):
-        # Adjacent swap: AB → BA = 1 (transposition)
-        assert _osa_distance(["A", "B"], ["B", "A"]) == 1.0
+        # With inverted cost, adjacent swap has cost=0 for each mismatch
+        assert _osa_distance(["A", "B"], ["B", "A"]) == 0.0
 
     def test_substitution(self):
-        assert _osa_distance(["A", "B", "C"], ["A", "X", "C"]) == 1.0
+        assert _osa_distance(["A", "B", "C"], ["A", "X", "C"]) == 2.0
 
     def test_osa_vs_levenshtein(self):
-        # OSA should be ≤ Levenshtein (transposition = 1 op instead of 2)
+        # OSA should be ≤ Levenshtein
         a = ["C", "A"]
         b = ["A", "C"]
         assert _osa_distance(a, b) <= _levenshtein_distance(a, b)

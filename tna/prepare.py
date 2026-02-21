@@ -440,47 +440,77 @@ def import_onehot(
         group_df = group_df.reset_index(drop=True)
         n_rows = len(group_df)
 
-        # Generate window boundaries
-        if window_type == "tumbling":
+        row_dict: dict = {}
+
+        if window_type == "sliding":
+            # R's sliding window: iterative lag expansion per column,
+            # then remove first row. Each remaining row is a window.
+            # For w in 1..(window_size-1): for each column, if current
+            # is active OR value w rows back is active → mark active.
+            # Uses previous iteration's result for lags.
+            active: dict[str, list[bool]] = {}
+            for col in cols:
+                active[col] = [
+                    pd.notna(group_df.iloc[r][col])
+                    for r in range(n_rows)
+                ]
+
+            # R's seq(1, ws-1) for ws=1 gives c(1,0) — always applies lag(1).
+            # Lag 0 is a no-op, so we use max(ws, 2) as upper bound.
+            for w in range(1, max(window_size, 2)):
+                for col in cols:
+                    prev = active[col].copy()
+                    new_active = [False] * n_rows
+                    for r in range(n_rows):
+                        new_active[r] = prev[r] or (r >= w and prev[r - w])
+                    active[col] = new_active
+
+            # Remove first row; each remaining row is a window.
+            # T numbering resets per window (matches R's pivot_wider).
+            for r in range(1, n_rows):
+                w_idx = r - 1
+                for t, col in enumerate(cols, start=1):
+                    row_dict[f"W{w_idx}_T{t}"] = col if active[col][r] else None
+
+        else:  # tumbling
             windows = [
                 (start, min(start + window_size, n_rows))
                 for start in range(0, n_rows, window_size)
             ]
-        else:  # sliding
-            n_windows = max(1, n_rows - window_size + 1)
-            windows = [
-                (start, min(start + window_size, n_rows))
-                for start in range(n_windows)
-            ]
 
-        row_dict: dict = {}
+            for w_idx, (start, end) in enumerate(windows):
+                window_df = group_df.iloc[start:end]
 
-        for w_idx, (start, end) in enumerate(windows):
-            window_df = group_df.iloc[start:end]
-
-            # Sliding windows and aggregate=True always collapse:
-            # one slot per column (first non-NA value)
-            if window_type == "sliding" or aggregate:
-                t = 1
-                for col in cols:
-                    first_val = None
-                    for _, r in window_df.iterrows():
-                        if pd.notna(r[col]):
-                            first_val = r[col]
-                            break
-                    row_dict[f"W{w_idx}_T{t}"] = first_val
-                    t += 1
-            else:
-                # Tumbling without aggregate: expand all rows × cols
-                t = 1
-                for _, r in window_df.iterrows():
+                if aggregate:
+                    # Aggregate: one slot per column (first non-NA value)
+                    t = 1
                     for col in cols:
-                        row_dict[f"W{w_idx}_T{t}"] = r[col]
+                        first_val = None
+                        for _, r in window_df.iterrows():
+                            if pd.notna(r[col]):
+                                first_val = r[col]
+                                break
+                        row_dict[f"W{w_idx}_T{t}"] = first_val
                         t += 1
+                else:
+                    # Tumbling without aggregate: expand all rows × cols
+                    t = 1
+                    for _, r in window_df.iterrows():
+                        for col in cols:
+                            row_dict[f"W{w_idx}_T{t}"] = r[col]
+                            t += 1
 
         group_rows.append(row_dict)
 
     if not group_rows:
         return pd.DataFrame()
 
-    return pd.DataFrame(group_rows)
+    result = pd.DataFrame(group_rows)
+
+    # Attach window metadata for windowed co-occurrence (matches R TNA attrs)
+    result.attrs['windowed'] = True
+    # R: window_size attr = window_size^(!aggregate) → ws when not aggregate, 1 when aggregate
+    result.attrs['window_size'] = window_size if not aggregate else 1
+    result.attrs['window_span'] = len(cols)
+
+    return result
