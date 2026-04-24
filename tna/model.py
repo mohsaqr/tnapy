@@ -324,7 +324,7 @@ def ctna(
 
 def atna(
     x: pd.DataFrame | np.ndarray | TNAData,
-    beta: float = 0.1,
+    beta: float = 1.0,
     scaling: str | list[str] | None = None,
     cols: list[str] | None = None,
     labels: list[str] | None = None,
@@ -333,14 +333,20 @@ def atna(
 ) -> TNA:
     """Build an attention-weighted transition model.
 
-    Uses exponential decay weighting based on distance.
+    Uses exponential decay `exp(-beta * distance)` to weight each
+    downstream (i, j) pair by how far apart the two positions are.
+
+    The default ``beta=1.0`` matches R TNA's ``atna()`` default
+    (``lambda=1``; the two parametrisations are related by
+    ``beta = 1 / lambda``).
 
     Parameters
     ----------
     x : pd.DataFrame, np.ndarray, or TNAData
         Input data (sequences or weight matrix)
-    beta : float
-        Decay parameter (higher = faster decay with distance)
+    beta : float, default 1.0
+        Decay parameter. Higher means faster decay with distance.
+        ``beta=1.0`` matches R TNA's ``lambda=1`` default.
     scaling : str or list of str, optional
         Scaling to apply: 'minmax', 'max', 'rank', or None
     cols : list of str, optional
@@ -355,7 +361,14 @@ def atna(
     Returns
     -------
     TNA
-        The built TNA model
+        The built TNA model.
+
+    Examples
+    --------
+    >>> import tna
+    >>> df = tna.load_group_regulation()
+    >>> model = tna.atna(df)           # beta=1.0 (R default)
+    >>> model_slow = tna.atna(df, beta=0.1)  # slower decay
     """
     return build_model(
         x, type_="attention", scaling=scaling, cols=cols,

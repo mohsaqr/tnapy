@@ -67,7 +67,8 @@ def compute_transitions(
         size = params.get('size', 3)
         weights, inits = _transitions_window(data, state_to_idx, n_states, size)
     elif type_ == "attention":
-        beta = params.get('beta', 0.1)
+        # Default beta=1.0 matches R TNA's lambda=1 (beta = 1/lambda).
+        beta = params.get('beta', 1.0)
         weights, inits = _transitions_attention(data, state_to_idx, n_states, beta)
     else:
         raise ValueError(f"Unknown transition type: {type_}")
@@ -177,7 +178,10 @@ def _transitions_cooccurrence(
         if first_state in state_to_idx:
             inits[state_to_idx[first_state]] += 1
 
-        # Count co-occurrences: all pairs (i, j) where i < j — matches R
+        # Count co-occurrences: all pairs (i, j) where i < j — matches R.
+        # When idx1 == idx2 (a same-state pair within the sequence), R's
+        # vectorized assignment with duplicate indices only applies one write;
+        # we guard the symmetric write so self-loops are counted once.
         for i in range(len(valid) - 1):
             for j in range(i + 1, len(valid)):
                 state1 = valid[i][1]
@@ -185,7 +189,8 @@ def _transitions_cooccurrence(
                 if state1 in state_to_idx and state2 in state_to_idx:
                     idx1, idx2 = state_to_idx[state1], state_to_idx[state2]
                     counts[idx1, idx2] += 1
-                    counts[idx2, idx1] += 1
+                    if idx1 != idx2:
+                        counts[idx2, idx1] += 1
 
     # Co-occurrence returns raw counts (not normalized)
     inits = inits / inits.sum() if inits.sum() > 0 else inits
@@ -405,7 +410,7 @@ def _transitions_attention(
     data: np.ndarray,
     state_to_idx: dict,
     n_states: int,
-    beta: float = 0.1
+    beta: float = 1.0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute attention-weighted transitions with exponential decay."""
     counts = np.zeros((n_states, n_states))
@@ -541,7 +546,9 @@ def compute_transitions_3d(
                                 ti = state_to_idx[to_str]
                                 trans[row, fi, ti] += 1
         else:
-            # Standard all-pairs co-occurrence
+            # Standard all-pairs co-occurrence. Guard the symmetric write when
+            # fi == ti so same-state pairs are counted once, matching R's
+            # vectorized duplicate-index assignment semantics.
             for i in range(n_steps - 1):
                 for j in range(i + 1, n_steps):
                     for row in range(n_sequences):
@@ -555,7 +562,8 @@ def compute_transitions_3d(
                             fi = state_to_idx[from_str]
                             ti = state_to_idx[to_str]
                             trans[row, fi, ti] += 1
-                            trans[row, ti, fi] += 1
+                            if fi != ti:
+                                trans[row, ti, fi] += 1
 
     return trans
 
