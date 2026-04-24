@@ -24,7 +24,22 @@ def get_labels(x: np.ndarray | pd.DataFrame, labels: list[str] | None = None) ->
 
 
 def row_normalize(mat: np.ndarray) -> np.ndarray:
-    """Normalize matrix rows to sum to 1 (transition probabilities)."""
+    """Normalize matrix rows to sum to 1 (transition probabilities).
+
+    Rows whose entries sum to zero are left as all-zero rows (instead of
+    producing ``NaN``) so that states with no outgoing observations
+    degrade gracefully.
+
+    Parameters
+    ----------
+    mat : np.ndarray
+        2D matrix of non-negative values.
+
+    Returns
+    -------
+    np.ndarray
+        Matrix with the same shape where each non-zero row sums to 1.
+    """
     row_sums = mat.sum(axis=1, keepdims=True)
     # Avoid division by zero
     row_sums = np.where(row_sums == 0, 1, row_sums)
@@ -32,7 +47,19 @@ def row_normalize(mat: np.ndarray) -> np.ndarray:
 
 
 def minmax_scale(mat: np.ndarray) -> np.ndarray:
-    """Min-max normalization to [0, 1]."""
+    """Min-max normalization to the unit interval.
+
+    Parameters
+    ----------
+    mat : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    np.ndarray
+        Array of the same shape scaled to ``[0, 1]``. If all values are
+        equal, returns a zero array.
+    """
     min_val = mat.min()
     max_val = mat.max()
     if max_val == min_val:
@@ -41,7 +68,19 @@ def minmax_scale(mat: np.ndarray) -> np.ndarray:
 
 
 def max_scale(mat: np.ndarray) -> np.ndarray:
-    """Divide by maximum value."""
+    """Divide all entries by the maximum value.
+
+    Parameters
+    ----------
+    mat : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    np.ndarray
+        Array scaled so the largest value is 1. If the maximum is 0,
+        the input is returned unchanged.
+    """
     max_val = mat.max()
     if max_val == 0:
         return mat.copy()
@@ -49,7 +88,23 @@ def max_scale(mat: np.ndarray) -> np.ndarray:
 
 
 def rank_scale(mat: np.ndarray) -> np.ndarray:
-    """Convert to ranks (1-based, average ties)."""
+    """Convert matrix entries to ranks.
+
+    Ranks are 1-based with average tie-breaking (matching R's
+    ``rank(ties.method = "average")``). Zero entries are preserved as
+    rank 0, which keeps sparse patterns sparse after scaling.
+
+    Parameters
+    ----------
+    mat : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    np.ndarray
+        Array of the same shape containing ranks; zero entries in the
+        input map to zero in the output.
+    """
     from scipy.stats import rankdata
     flat = mat.flatten()
     # Rank non-zero values, keep zeros as zero

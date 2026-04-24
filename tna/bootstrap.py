@@ -215,7 +215,23 @@ class PermutationResult:
         return bool(np.any(self.edges['stats']['p_value'].values < alpha))
 
     def plot(self, ax: Axes | None = None, **kwargs) -> Axes:
-        """Plot the permutation results."""
+        """Plot the permutation test null distribution.
+
+        Convenience wrapper that forwards to :func:`plot_permutation`.
+
+        Parameters
+        ----------
+        ax : matplotlib Axes, optional
+            Axes to draw on. A new one is created if ``None``.
+        **kwargs
+            Additional keyword arguments passed to :func:`plot_permutation`
+            (e.g., ``bins``, ``color``).
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes containing the plot.
+        """
         return plot_permutation(self, ax=ax, **kwargs)
 
 

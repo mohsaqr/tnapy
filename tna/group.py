@@ -53,12 +53,15 @@ class GroupTNA:
         return len(self.models)
 
     def keys(self):
+        """Return a view of group names (like ``dict.keys``)."""
         return self.models.keys()
 
     def values(self):
+        """Return a view of per-group :class:`TNA` models (like ``dict.values``)."""
         return self.models.values()
 
     def items(self):
+        """Return a view of ``(group_name, TNA)`` pairs (like ``dict.items``)."""
         return self.models.items()
 
     # ------------------------------------------------------------------
@@ -83,7 +86,13 @@ class GroupTNA:
     # ------------------------------------------------------------------
 
     def names(self) -> list[str]:
-        """Return group names as a list."""
+        """Return group names as a list.
+
+        Returns
+        -------
+        list of str
+            Group names in the order they were added to the container.
+        """
         return list(self.models.keys())
 
     def rename_groups(self, new_names: list[str]) -> "GroupTNA":
@@ -301,7 +310,27 @@ def group_ftna(
     labels: list[str] | None = None,
     **kwargs: Any,
 ) -> GroupTNA:
-    """Build grouped frequency-based transition models."""
+    """Build one frequency-based (:func:`ftna`) TNA model per group.
+
+    Parameters
+    ----------
+    x : pd.DataFrame or TNAData
+        Input data (wide-format sequences or a prepared :class:`TNAData`).
+    group : str, list, or np.ndarray
+        Grouping variable. A string names a column in ``x``; a list or
+        array gives one label per sequence.
+    scaling : str or list of str, optional
+        Scaling applied to each group's weight matrix.
+    labels : list of str, optional
+        State labels (shared across groups).
+    **kwargs
+        Forwarded to :func:`build_model` for each group.
+
+    Returns
+    -------
+    GroupTNA
+        Container holding one :class:`TNA` model per group.
+    """
     return _build_group_models(
         x, group, type_="frequency", scaling=scaling, labels=labels, **kwargs
     )
@@ -314,7 +343,27 @@ def group_ctna(
     labels: list[str] | None = None,
     **kwargs: Any,
 ) -> GroupTNA:
-    """Build grouped co-occurrence transition models."""
+    """Build one co-occurrence (:func:`ctna`) TNA model per group.
+
+    Parameters
+    ----------
+    x : pd.DataFrame or TNAData
+        Input data (wide-format sequences or a prepared :class:`TNAData`).
+    group : str, list, or np.ndarray
+        Grouping variable. A string names a column in ``x``; a list or
+        array gives one label per sequence.
+    scaling : str or list of str, optional
+        Scaling applied to each group's weight matrix.
+    labels : list of str, optional
+        State labels (shared across groups).
+    **kwargs
+        Forwarded to :func:`build_model` for each group.
+
+    Returns
+    -------
+    GroupTNA
+        Container holding one :class:`TNA` model per group.
+    """
     return _build_group_models(
         x, group, type_="co-occurrence", scaling=scaling, labels=labels, **kwargs
     )
@@ -327,7 +376,28 @@ def group_atna(
     labels: list[str] | None = None,
     **kwargs: Any,
 ) -> GroupTNA:
-    """Build grouped attention-weighted transition models."""
+    """Build one attention-weighted (:func:`atna`) TNA model per group.
+
+    Parameters
+    ----------
+    x : pd.DataFrame or TNAData
+        Input data (wide-format sequences or a prepared :class:`TNAData`).
+    group : str, list, or np.ndarray
+        Grouping variable. A string names a column in ``x``; a list or
+        array gives one label per sequence.
+    scaling : str or list of str, optional
+        Scaling applied to each group's weight matrix.
+    labels : list of str, optional
+        State labels (shared across groups).
+    **kwargs
+        Forwarded to :func:`build_model` for each group (e.g. ``beta``
+        for the attention decay).
+
+    Returns
+    -------
+    GroupTNA
+        Container holding one :class:`TNA` model per group.
+    """
     return _build_group_models(
         x, group, type_="attention", scaling=scaling, labels=labels, **kwargs
     )
